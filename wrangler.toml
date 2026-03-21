@@ -15,7 +15,7 @@ not_found_handling = "404-page"
 [[d1_databases]]
 binding = "DB"
 database_name = "education_db"
-database_id = "a0021f2e-a8cc-4e20-8910-3c7290ba47a6"
+database_id = "ADD_YOUR_DATABASE_ID_HERE"
 
 
 [observability]
