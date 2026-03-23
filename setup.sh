@@ -26,8 +26,6 @@ if echo "$OUTPUT" | grep -q "already exists"; then
   OUTPUT=$(wrangler d1 list)
 fi
 
-DB_ID=$(echo "$OUTPUT" | grep -oE '[a-f0-9-]{36}' | head -n 1)
-
 # Extract database_id
 DB_ID=$(echo "$OUTPUT" | grep -oE '[a-f0-9-]{36}' | head -n 1)
 
@@ -37,20 +35,31 @@ if [ -z "$DB_ID" ]; then
   exit 1
 fi
 
-echo "Database created with ID: $DB_ID"
+echo "Using Database ID: $DB_ID"
 
 # Step 3: Update wrangler.toml
 echo "Updating wrangler.toml..."
 
-sed -i "0,/ADD_YOUR_LOCAL_DATABASE_ID_HERE/s//${DB_ID}/" wrangler.toml
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  # macOS BSD sed
+  sed -i '' "s/ADD_YOUR_LOCAL_DATABASE_ID_HERE/${DB_ID}/" wrangler.toml
+else
+  # GNU sed (Linux)
+  sed -i "0,/ADD_YOUR_LOCAL_DATABASE_ID_HERE/s//${DB_ID}/" wrangler.toml
+fi
 
 echo "wrangler.toml updated"
 
 # Step 4: Apply schema
 echo "Applying schema..."
-wrangler d1 execute education_db --file=schema.sql
+wrangler d1 execute education_db --file=schema.sql --env dev
+
+if [ $? -ne 0 ]; then
+  echo "Failed to apply schema."
+  exit 1
+fi
 
 echo "Schema applied"
 
 echo "Setup complete!"
-echo "Run: wrangler dev"
+echo "Run: wrangler dev --env dev""
