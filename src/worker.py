@@ -34,9 +34,8 @@ from urllib.parse import urlparse
 
 from workers import Response
 
-from api_handlers import (
+from api_activities import (
     api_add_activity_tags,
-    api_admin_table_counts,
     api_create_activity,
     api_create_session,
     api_dashboard,
@@ -44,21 +43,20 @@ from api_handlers import (
     api_join,
     api_list_activities,
     api_list_tags,
-    api_login,
-    api_register,
 )
-from platform_utils import (
+from api_admin import api_admin_table_counts
+from api_auth import api_login, api_register
+from db_utils import init_db, seed_db
+from http_utils import (
     _CORS,
     capture_exception,
     clean_path,
     err,
-    init_db,
     is_basic_auth_valid,
     ok,
-    seed_db,
-    serve_static,
     unauthorized_basic,
 )
+from static_utils import serve_static
 
 # ---------------------------------------------------------------------------
 # Main dispatcher
