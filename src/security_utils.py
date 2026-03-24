@@ -3,7 +3,7 @@ Security helpers live here.
 
 This file keeps the auth and encryption pieces in one place so the Worker
 entry file can stay focused on routing. If we expand the site later, this is
-the file that should keep low-level security utilities, not request handlers.
+the file that should keep low-level security utilities, not request handlers
 """
 
 import base64
