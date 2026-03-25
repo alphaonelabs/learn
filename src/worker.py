@@ -1062,6 +1062,167 @@ async def api_add_activity_tags(req, env):
     return ok(None, "Tags updated")
 
 
+async def api_update_activity(act_id, req, env):
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+
+    body, bad_resp = await parse_json_object(req)
+    if bad_resp:
+        return bad_resp
+
+    title         = body.get("title")
+    description   = body.get("description")
+    atype         = body.get("type")
+    fmt           = body.get("format")
+    schedule_type = body.get("schedule_type")
+
+    owned = await env.DB.prepare(
+        "SELECT id FROM activities WHERE id=? AND host_id=?"
+    ).bind(act_id, user["id"]).first()
+    if not owned:
+        return err("Activity not found or access denied", 404)
+
+    updates = []
+    params = []
+
+    if title is not None:
+        title = title.strip()
+        if not title:
+            return err("title cannot be empty")
+        updates.append("title=(?)")
+        params.append(title)
+
+    if description is not None:
+        description = description.strip()
+        enc = env.ENCRYPTION_KEY
+        updates.append("description=(?)")
+        params.append(encrypt(description, enc) if description else "")
+
+    if atype is not None:
+        atype = atype.strip()
+        if atype not in ("course", "meetup", "workshop", "seminar", "other"):
+            atype = "course"
+        updates.append("type=(?)")
+        params.append(atype)
+
+    if fmt is not None:
+        fmt = fmt.strip()
+        if fmt not in ("live", "self_paced", "hybrid"):
+            fmt = "self_paced"
+        updates.append("format=(?)")
+        params.append(fmt)
+
+    if schedule_type is not None:
+        schedule_type = schedule_type.strip()
+        if schedule_type not in ("one_time", "multi_session", "recurring", "ongoing"):
+            schedule_type = "ongoing"
+        updates.append("schedule_type=(?)")
+        params.append(schedule_type)
+
+    if updates:
+        params.append(act_id)
+        query = "UPDATE activities SET " + ", ".join(updates) + " WHERE id=(?)"
+        try:
+            await env.DB.prepare(query).bind(*params).run()
+        except Exception as e:
+            capture_exception(e, req, env, "api_update_activity.update_activity")
+            return err("Failed to update activity, please try again", 500)
+
+    if "tags" in body:
+        tags = body.get("tags") or []
+        try:
+            await env.DB.prepare("DELETE FROM activity_tags WHERE activity_id=?").bind(act_id).run()
+        except Exception:
+            pass
+
+        for tag_name in tags:
+            tag_name = tag_name.strip()
+            if not tag_name:
+                continue
+            t_row = await env.DB.prepare("SELECT id FROM tags WHERE name=?").bind(tag_name).first()
+            if t_row:
+                tag_id = t_row.id
+            else:
+                tag_id = new_id()
+                try:
+                    await env.DB.prepare("INSERT INTO tags (id,name) VALUES (?,?)").bind(tag_id, tag_name).run()
+                except Exception:
+                    continue
+            try:
+                await env.DB.prepare("INSERT OR IGNORE INTO activity_tags (activity_id,tag_id) VALUES (?,?)").bind(act_id, tag_id).run()
+            except Exception:
+                pass
+
+    return ok(None, "Activity updated")
+
+
+async def api_update_session(ses_id, req, env):
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+
+    body, bad_resp = await parse_json_object(req)
+    if bad_resp:
+        return bad_resp
+
+    row = await env.DB.prepare(
+        "SELECT s.activity_id, a.host_id FROM sessions s JOIN activities a ON s.activity_id = a.id WHERE s.id=?"
+    ).bind(ses_id).first()
+
+    if not row or row.host_id != user["id"]:
+        return err("Session not found or access denied", 404)
+
+    title       = body.get("title")
+    description = body.get("description")
+    start_time  = body.get("start_time")
+    end_time    = body.get("end_time")
+    location    = body.get("location")
+
+    updates = []
+    params = []
+
+    if title is not None:
+        title = title.strip()
+        if not title:
+            return err("title cannot be empty")
+        updates.append("title=(?)")
+        params.append(title)
+
+    if description is not None:
+        description = description.strip()
+        enc = env.ENCRYPTION_KEY
+        updates.append("description=(?)")
+        params.append(encrypt(description, enc) if description else "")
+
+    if start_time is not None:
+        start_time = start_time.strip()
+        updates.append("start_time=(?)")
+        params.append(start_time)
+
+    if end_time is not None:
+        end_time = end_time.strip()
+        updates.append("end_time=(?)")
+        params.append(end_time)
+
+    if location is not None:
+        location = location.strip()
+        enc = env.ENCRYPTION_KEY
+        updates.append("location=(?)")
+        params.append(encrypt(location, enc) if location else "")
+
+    if updates:
+        params.append(ses_id)
+        query = "UPDATE sessions SET " + ", ".join(updates) + " WHERE id=(?)"
+        try:
+            await env.DB.prepare(query).bind(*params).run()
+        except Exception as e:
+            capture_exception(e, req, env, "api_update_session.update_session")
+            return err("Failed to update session, please try again", 500)
+
+    return ok(None, "Session updated")
+
+
 async def api_admin_table_counts(req, env):
     if not _is_basic_auth_valid(req, env):
         return _unauthorized_basic()
@@ -1179,6 +1340,8 @@ async def _dispatch(request, env):
         m = re.fullmatch(r"/api/activities/([A-Za-z0-9_-]+)", path)
         if m and method == "GET":
             return await api_get_activity(m.group(1), request, env)
+        if m and method == "PUT":
+            return await api_update_activity(m.group(1), request, env)
 
         if path == "/api/join" and method == "POST":
             return await api_join(request, env)
@@ -1188,6 +1351,10 @@ async def _dispatch(request, env):
 
         if path == "/api/sessions" and method == "POST":
             return await api_create_session(request, env)
+            
+        m_ses = re.fullmatch(r"/api/sessions/([A-Za-z0-9_-]+)", path)
+        if m_ses and method == "PUT":
+            return await api_update_session(m_ses.group(1), request, env)
 
         if path == "/api/tags" and method == "GET":
             return await api_list_tags(request, env)
