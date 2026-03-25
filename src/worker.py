@@ -1108,7 +1108,7 @@ async def api_update_activity(act_id, req, env):
             return err("type must be a string", 400)
         atype = atype.strip()
         if atype not in ("course", "meetup", "workshop", "seminar", "other"):
-            atype = "course"
+            return err("type must be one of: course, meetup, workshop, seminar, other", 400)
         updates.append("type=(?)")
         params.append(atype)
 
@@ -1117,7 +1117,7 @@ async def api_update_activity(act_id, req, env):
             return err("format must be a string", 400)
         fmt = fmt.strip()
         if fmt not in ("live", "self_paced", "hybrid"):
-            fmt = "self_paced"
+            return err("format must be one of: live, self_paced, hybrid", 400)
         updates.append("format=(?)")
         params.append(fmt)
 
@@ -1126,7 +1126,7 @@ async def api_update_activity(act_id, req, env):
             return err("schedule_type must be a string", 400)
         schedule_type = schedule_type.strip()
         if schedule_type not in ("one_time", "multi_session", "recurring", "ongoing"):
-            schedule_type = "ongoing"
+            return err("schedule_type must be one of: one_time, multi_session, recurring, ongoing", 400)
         updates.append("schedule_type=(?)")
         params.append(schedule_type)
 
@@ -1142,7 +1142,7 @@ async def api_update_activity(act_id, req, env):
         return ok(None, "No changes provided")
 
     if "tags" in body:
-        tags = body.get("tags") or []
+        tags = body.get("tags")
         try:
             await env.DB.prepare("DELETE FROM activity_tags WHERE activity_id=?").bind(act_id).run()
         except Exception as e:

@@ -454,8 +454,9 @@
       
       showMsg('ses-ok', `Session ${editSessionId ? 'updated' : 'added'} successfully!`, false);
       cancelEditSession();
-      await onActivitySelect(); // refresh session list
       await loadHostedActivities();
+      document.getElementById('s-activity').value = actId;
+      await onActivitySelect(); // refresh session list
     } catch (err) { showMsg('ses-err', err.message, true); }
     finally { btn.textContent = editSessionId ? 'Update Session' : 'Add Session'; btn.disabled = false; }
   });
