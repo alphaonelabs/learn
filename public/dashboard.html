@@ -97,12 +97,12 @@
     document.getElementById('header-sub').textContent        = 'Manage your hosted activities and track your participation.';
     document.getElementById('section-title').textContent     = 'Hosted Activities';
 
-    const totalParts = hosted.reduce((s,a) => s + (a.participant_count||0), 0);
+    const stats = data.stats || {};
     document.getElementById('stat-cards').innerHTML =
-      statCard(hosted.length,  'Hosted',       'text-brand') +
-      statCard(totalParts,     'Participants', 'text-purple-600') +
-      statCard(joined.length,  'Joined',       'text-emerald-600') +
-      statCard('🔒',           'Encrypted',    'text-amber-500');
+      statCard(stats.hosted_count ?? hosted.length,            'Hosted',           'text-brand') +
+      statCard(stats.total_joined ?? joined.length,            'Joined',           'text-emerald-600') +
+      statCard(stats.completed ?? 0,                           'Completed',        'text-blue-600') +
+      statCard(stats.total_sessions_attended ?? 0,             'Sessions Attended','text-purple-600');
 
     document.getElementById('quick-actions').innerHTML =
       '<div class="flex flex-wrap gap-3">' +
@@ -150,6 +150,11 @@
         const rc  = roleColor[a.enr_role]     || 'bg-slate-100 text-slate-600';
         const sc  = statusColor[a.enr_status] || 'bg-slate-100 text-slate-600';
         const tags = (a.tags||[]).slice(0,3).map(t => '<span class="badge bg-slate-100 text-slate-500">' + esc(t) + '</span>').join('');
+        const pct = a.progress_pct ?? 0;
+        const progressBar = a.total_sessions > 0
+          ? '<div class="mt-1"><div class="flex justify-between text-xs text-slate-400 mb-1"><span>Progress</span><span>' + a.attended_sessions + '/' + a.total_sessions + ' sessions</span></div>' +
+            '<div class="w-full bg-slate-100 rounded-full h-2" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100" aria-label="Session attendance progress"><div class="bg-indigo-500 h-2 rounded-full transition-all" style="width:' + pct + '%"></div></div></div>'
+          : '<p class="text-xs text-slate-400">No sessions scheduled yet</p>';
         return '<article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 card-hover flex flex-col gap-3">' +
           '<div class="flex items-start justify-between gap-2">' +
             '<h3 class="font-bold text-slate-800 text-sm">' + ic + ' ' + esc(a.title) + '</h3>' +
@@ -161,6 +166,7 @@
             '<span class="badge ' + sc + '">' + esc(a.enr_status) + '</span>' +
             '<span class="text-xs text-slate-400">' + (fmtLabel[a.format]||a.format) + '</span>' +
           '</div>' +
+          progressBar +
           '<div class="flex flex-wrap gap-1">' + tags + '</div>' +
           '<a href="/course.html?id=' + esc(a.id) + '" class="mt-auto block text-center text-sm font-semibold text-brand border border-brand/30 rounded-lg py-1.5 hover:bg-indigo-50">View Activity</a>' +
           '</article>';
