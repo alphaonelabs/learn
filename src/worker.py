@@ -1128,7 +1128,7 @@ async def api_update_activity(act_id, req, env):
         except Exception as e:
             capture_exception(e, req, env, "api_update_activity.update_activity")
             return err("Failed to update activity, please try again", 500)
-    else:
+    elif "tags" not in body:
         return ok(None, "No changes provided")
 
     if "tags" in body:

@@ -372,7 +372,7 @@
         return `<li class="px-4 py-2 flex justify-between items-center bg-white hover:bg-slate-50">
           <div>
             <span class="font-semibold text-slate-800">${esc(s.title)}</span>
-            <div class="text-xs text-slate-500">${s.start_time || ''}</div>
+            <div class="text-xs text-slate-500">${esc(s.start_time || '')}</div>
           </div>
           <button type="button" onclick="startEditSession('${esc(s.id)}')" class="text-xs text-brand font-semibold border border-brand/30 px-2 py-1 rounded hover:bg-indigo-50">Edit</button>
         </li>`;
