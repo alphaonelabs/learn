@@ -1128,31 +1128,34 @@ async def api_update_activity(act_id, req, env):
         except Exception as e:
             capture_exception(e, req, env, "api_update_activity.update_activity")
             return err("Failed to update activity, please try again", 500)
+    else:
+        return ok(None, "No changes provided")
 
     if "tags" in body:
         tags = body.get("tags") or []
         try:
             await env.DB.prepare("DELETE FROM activity_tags WHERE activity_id=?").bind(act_id).run()
-        except Exception:
-            pass
+        except Exception as e:
+            capture_exception(e, req, env, "api_update_activity.delete_activity_tags")
 
         for tag_name in tags:
-            tag_name = tag_name.strip()
-            if not tag_name:
+            tag_name_clean = tag_name.strip()
+            if not tag_name_clean:
                 continue
-            t_row = await env.DB.prepare("SELECT id FROM tags WHERE name=?").bind(tag_name).first()
+            t_row = await env.DB.prepare("SELECT id FROM tags WHERE name=?").bind(tag_name_clean).first()
             if t_row:
                 tag_id = t_row.id
             else:
                 tag_id = new_id()
                 try:
-                    await env.DB.prepare("INSERT INTO tags (id,name) VALUES (?,?)").bind(tag_id, tag_name).run()
-                except Exception:
+                    await env.DB.prepare("INSERT INTO tags (id,name) VALUES (?,?)").bind(tag_id, tag_name_clean).run()
+                except Exception as e:
+                    capture_exception(e, req, env, f"api_update_activity.insert_tag: tag_name={tag_name_clean}")
                     continue
             try:
                 await env.DB.prepare("INSERT OR IGNORE INTO activity_tags (activity_id,tag_id) VALUES (?,?)").bind(act_id, tag_id).run()
-            except Exception:
-                pass
+            except Exception as e:
+                capture_exception(e, req, env, f"api_update_activity.insert_activity_tag: tag_id={tag_id}")
 
     return ok(None, "Activity updated")
 
@@ -1219,6 +1222,8 @@ async def api_update_session(ses_id, req, env):
         except Exception as e:
             capture_exception(e, req, env, "api_update_session.update_session")
             return err("Failed to update session, please try again", 500)
+    else:
+        return ok(None, "No changes provided")
 
     return ok(None, "Session updated")
 

@@ -356,7 +356,11 @@
     }
 
     const res = await fetch('/api/activities/' + actId, { headers: { Authorization: 'Bearer ' + token } });
-    if (!res.ok) return;
+    if (!res.ok) {
+      showMsg('ses-err', 'Failed to load sessions for this activity', true);
+      listDiv.classList.add('hidden');
+      return;
+    }
     const data = await res.json();
     currentActivitySessions = data.sessions || [];
     
@@ -370,7 +374,7 @@
             <span class="font-semibold text-slate-800">${esc(s.title)}</span>
             <div class="text-xs text-slate-500">${s.start_time || ''}</div>
           </div>
-          <button type="button" onclick="startEditSession('${s.id}')" class="text-xs text-brand font-semibold border border-brand/30 px-2 py-1 rounded hover:bg-indigo-50">Edit</button>
+          <button type="button" onclick="startEditSession('${esc(s.id)}')" class="text-xs text-brand font-semibold border border-brand/30 px-2 py-1 rounded hover:bg-indigo-50">Edit</button>
         </li>`;
       }).join('');
     }
