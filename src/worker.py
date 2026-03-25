@@ -14,6 +14,9 @@ API Routes
   POST /api/sessions          – add a session to activity    [host]
   GET  /api/tags              – list all tags
   POST /api/activity-tags     – add tags to an activity      [host]
+  GET  /api/activities/:id/comments – list comments for an activity
+  POST /api/activities/:id/comments – post a comment            [auth]
+  DELETE /api/comments/:id         – delete a comment           [owner|host]
 
 Security model
   * ALL user PII (username, email, display name, role) is encrypted with
@@ -450,6 +453,22 @@ _DDL = [
     "CREATE INDEX IF NOT EXISTS idx_sa_session           ON session_attendance(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_sa_user              ON session_attendance(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_at_activity          ON activity_tags(activity_id)",
+    # Comments
+    """CREATE TABLE IF NOT EXISTS comments (
+        id          TEXT PRIMARY KEY,
+        activity_id TEXT NOT NULL,
+        user_id     TEXT NOT NULL,
+        body        TEXT NOT NULL,
+        parent_id   TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at  TEXT,
+        FOREIGN KEY (activity_id) REFERENCES activities(id),
+        FOREIGN KEY (user_id)     REFERENCES users(id),
+        FOREIGN KEY (parent_id)   REFERENCES comments(id) ON DELETE CASCADE
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_comments_activity ON comments(activity_id)",
+    "CREATE INDEX IF NOT EXISTS idx_comments_parent   ON comments(parent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_comments_user     ON comments(user_id)",
 ]
 
 
@@ -1294,6 +1313,131 @@ async def _dispatch(request, env):
         return err("API endpoint not found", 404)
 
     return await serve_static(path, env)
+
+
+
+# ---------------------------------------------------------------------------
+# Comments API
+# ---------------------------------------------------------------------------
+
+async def api_get_comments(_req, env, activity_id: str, enc_key: str):
+    """GET /api/activities/:id/comments — list comments for an activity."""
+    # Check activity exists
+    act = await env.DB.prepare(
+        "SELECT id, host_id FROM activities WHERE id = ?"
+    ).bind(activity_id).first()
+    if not act:
+        return err("Activity not found", 404)
+    # Check user is enrolled or is host
+    if act["host_id"] != user["id"]:
+        enr = await env.DB.prepare(
+            "SELECT id FROM enrollments WHERE activity_id=? AND user_id=? AND status='active'"
+        ).bind(activity_id, user["id"]).first()
+        if not enr:
+            return err("You must be enrolled to comment", 403)
+
+    rows = await env.DB.prepare(
+        "SELECT c.id, c.body, c.parent_id, c.created_at, c.updated_at, "
+        "c.user_id, u.name AS author_name "
+        "FROM comments c "
+        "JOIN users u ON u.id = c.user_id "
+        "WHERE c.activity_id = ? "
+        "ORDER BY c.created_at ASC"
+    ).bind(activity_id).all()
+
+    comments = [
+        {
+            "id": r["id"],
+            "body": await decrypt_aes(r["body"] or "", enc_key),
+            "parent_id": r["parent_id"],
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+            "user_id": r["user_id"],
+            "author": await decrypt_aes(r["author_name"] or "", enc_key),
+        }
+        for r in (rows.results or [])
+    ]
+    return ok(comments)
+
+
+async def api_post_comment(req, env, activity_id: str, user, enc_key: str):
+    """POST /api/activities/:id/comments — post a comment (auth required)."""
+    if not user:
+        return err("Authentication required", 401)
+
+    # Check activity exists
+    act = await env.DB.prepare(
+        "SELECT id, host_id FROM activities WHERE id = ?"
+    ).bind(activity_id).first()
+    if not act:
+        return err("Activity not found", 404)
+    # Check user is enrolled or is host
+    if act["host_id"] != user["id"]:
+        enr = await env.DB.prepare(
+            "SELECT id FROM enrollments WHERE activity_id=? AND user_id=? AND status='active'"
+        ).bind(activity_id, user["id"]).first()
+        if not enr:
+            return err("You must be enrolled to comment", 403)
+
+    body, parse_err = await parse_json_object(req)
+    if parse_err:
+        return parse_err
+
+    raw_body = body.get("body")
+    if not isinstance(raw_body, str):
+        return err("Comment body must be a string")
+    text = raw_body.strip()
+    if not text:
+        return err("Comment body is required")
+    if len(text) > 2000:
+        return err("Comment must be 2000 characters or fewer")
+
+    raw_parent = body.get("parent_id")
+    if raw_parent is not None and not isinstance(raw_parent, str):
+        return err("parent_id must be a string")
+    parent_id = raw_parent or None
+    if parent_id:
+        parent = await env.DB.prepare(
+            "SELECT id FROM comments WHERE id = ? AND activity_id = ?"
+        ).bind(parent_id, activity_id).first()
+        if not parent:
+            return err("Parent comment not found", 404)
+
+    cid = new_id()
+    try:
+        await env.DB.prepare(
+            "INSERT INTO comments (id, activity_id, user_id, body, parent_id) "
+            "VALUES (?, ?, ?, ?, ?)"
+        ).bind(cid, activity_id, user["id"], await encrypt_aes(text, enc_key), parent_id).run()
+    except Exception as exc:
+        capture_exception(exc, where="api_post_comment")
+        return err("Failed to save comment", 500)
+
+    return ok({"id": cid, "body": text, "parent_id": parent_id,
+               "user_id": user["id"], "activity_id": activity_id}, "Comment posted")
+
+
+async def api_delete_comment(_req, env, comment_id: str, user):
+    """DELETE /api/comments/:id — delete own comment (or host deletes any)."""
+    if not user:
+        return err("Authentication required", 401)
+
+    comment = await env.DB.prepare(
+        "SELECT c.id, c.user_id, a.host_id "
+        "FROM comments c JOIN activities a ON a.id = c.activity_id "
+        "WHERE c.id = ?"
+    ).bind(comment_id).first()
+    if not comment:
+        return err("Comment not found", 404)
+
+    is_owner = comment["user_id"] == user["id"]
+    is_host = comment["host_id"] == user["id"]
+
+    if not (is_owner or is_host):
+        return err("Permission denied", 403)
+
+    await env.DB.prepare("DELETE FROM comments WHERE id = ?").bind(comment_id).run()
+    return ok(msg="Comment deleted")
 
 
 async def on_fetch(request, env):
