@@ -48,7 +48,7 @@ from api_admin import api_admin_table_counts
 from api_auth import api_login, api_register
 from db_utils import init_db, seed_db
 from http_utils import (
-    _CORS,
+    CORS,
     capture_exception,
     clean_path,
     err,
@@ -68,7 +68,7 @@ async def _dispatch(request, env):
     admin_path = clean_path(getattr(env, "ADMIN_URL", ""))
 
     if method == "OPTIONS":
-        return Response("", status=204, headers=_CORS)
+        return Response("", status=204, headers=CORS)
 
     if path == admin_path and method == "GET":
         if not is_basic_auth_valid(request, env):

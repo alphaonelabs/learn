@@ -1,7 +1,3 @@
-"""
-Shared HTTP helpers live here.
-"""
-
 import base64
 import hmac as _hmac
 import json
@@ -32,7 +28,7 @@ def capture_exception(exc: Exception, req=None, _env=None, where: str = ""):
         pass
 
 
-_CORS = {
+CORS = {
     "Access-Control-Allow-Origin":  "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
@@ -43,7 +39,7 @@ def json_resp(data, status: int = 200):
     return Response(
         json.dumps(data),
         status=status,
-        headers={"Content-Type": "application/json", **_CORS},
+        headers={"Content-Type": "application/json", **CORS},
     )
 
 
@@ -91,7 +87,7 @@ def unauthorized_basic(realm: str = "Alpha One Labs Admin"):
     return Response(
         "Authentication required",
         status=401,
-        headers={"WWW-Authenticate": f'Basic realm="{realm}"', **_CORS},
+        headers={"WWW-Authenticate": f'Basic realm="{realm}"', **CORS},
     )
 
 

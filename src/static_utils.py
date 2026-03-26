@@ -1,10 +1,6 @@
-"""
-Static file serving helpers live here.
-"""
-
 from workers import Response
 
-from http_utils import _CORS
+from http_utils import CORS
 
 _MIME = {
     "html": "text/html; charset=utf-8",
@@ -46,4 +42,4 @@ async def serve_static(path: str, env):
 
     ext  = key.rsplit(".", 1)[-1] if "." in key else "html"
     mime = _MIME.get(ext, "text/plain")
-    return Response(content, headers={"Content-Type": mime, **_CORS})
+    return Response(content, headers={"Content-Type": mime, **CORS})
