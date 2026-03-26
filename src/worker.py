@@ -35,6 +35,7 @@ import hmac as _hmac
 import json
 import os
 import re
+import time
 import traceback
 from urllib.parse import urlparse, parse_qs
 
@@ -151,16 +152,22 @@ def hash_password(password: str, username: str) -> str:
 
 
 def verify_password(password: str, stored: str, username: str) -> bool:
-    return hash_password(password, username) == stored
+    return _hmac.compare_digest(hash_password(password, username), stored)
 
 
 # ---------------------------------------------------------------------------
 # Auth tokens (HMAC-SHA256 signed, stateless JWT-lite)
 # ---------------------------------------------------------------------------
 
+_TOKEN_TTL = 3600  # 1 hour
+
+
 def create_token(uid: str, username: str, role: str, secret: str) -> str:
     payload = base64.b64encode(
-        json.dumps({"id": uid, "username": username, "role": role}).encode()
+        json.dumps({
+            "id": uid, "username": username, "role": role,
+            "exp": int(time.time()) + _TOKEN_TTL,
+        }).encode()
     ).decode("ascii")
     sig = _hmac.new(
         secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
@@ -169,7 +176,7 @@ def create_token(uid: str, username: str, role: str, secret: str) -> str:
 
 
 def verify_token(raw: str, secret: str):
-    """Return decoded payload dict or None if invalid/missing."""
+    """Return decoded payload dict or None if invalid/missing/expired."""
     if not raw:
         return None
     try:
@@ -178,13 +185,16 @@ def verify_token(raw: str, secret: str):
         if dot == -1:
             return None
         p, sig = token[:dot], token[dot + 1:]
-        exp = _hmac.new(
+        expected = _hmac.new(
             secret.encode("utf-8"), p.encode("utf-8"), hashlib.sha256
         ).hexdigest()
-        if not _hmac.compare_digest(sig, exp):
+        if not _hmac.compare_digest(sig, expected):
             return None
         padding = (4 - len(p) % 4) % 4
-        return json.loads(base64.b64decode(p + "=" * padding).decode("utf-8"))
+        data = json.loads(base64.b64decode(p + "=" * padding).decode("utf-8"))
+        if data.get("exp") and int(data["exp"]) < int(time.time()):
+            return None
+        return data
     except Exception:
         return None
 
