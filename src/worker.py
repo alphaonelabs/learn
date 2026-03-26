@@ -193,8 +193,8 @@ def verify_token(raw: str, secret: str):
 # Response helpers
 # ---------------------------------------------------------------------------
 
+_CORS_ORIGIN_INITIALISED = False
 _CORS = {
-    "Access-Control-Allow-Origin":  "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
 }
@@ -870,12 +870,11 @@ async def api_join(req, env):
         return bad_resp
 
     act_id = body.get("activity_id")
-    role   = (body.get("role") or "participant").strip()
 
     if not act_id:
         return err("activity_id is required")
-    if role not in ("participant", "instructor", "organizer"):
-        role = "participant"
+
+    role = "participant"
 
     act = await env.DB.prepare(
         "SELECT id FROM activities WHERE id=?"
@@ -1134,6 +1133,12 @@ async def serve_static(path: str, env):
 # ---------------------------------------------------------------------------
 
 async def _dispatch(request, env):
+    global _CORS_ORIGIN_INITIALISED
+    if not _CORS_ORIGIN_INITIALISED:
+        _CORS_ORIGIN_INITIALISED = True
+        origin = getattr(env, "ALLOWED_ORIGIN", "")
+        _CORS["Access-Control-Allow-Origin"] = origin if origin else "*"
+
     path   = urlparse(request.url).path
     method = request.method.upper()
     admin_path = _clean_path(getattr(env, "ADMIN_URL", ""))
@@ -1156,6 +1161,8 @@ async def _dispatch(request, env):
                 return err("Database init failed — check D1 binding", 500)
 
         if path == "/api/seed" and method == "POST":
+            if not _is_basic_auth_valid(request, env):
+                return _unauthorized_basic()
             try:
                 await init_db(env)
                 await seed_db(env, env.ENCRYPTION_KEY)
