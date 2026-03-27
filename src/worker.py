@@ -652,6 +652,8 @@ async def api_register(req, env):
 
     if not username or not email or not password:
         return err("username, email, and password are required")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return err("Please provide a valid email address")
     if len(password) < 8:
         return err("Password must be at least 8 characters")
 
