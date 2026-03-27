@@ -46,11 +46,14 @@
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
-      <!-- Create Activity -->
-      <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-purple-50">
-          <h2 class="font-bold text-slate-800">&#127775; Create New Activity</h2>
-          <p class="text-slate-500 text-xs mt-0.5">Descriptions are encrypted at rest in D1.</p>
+      <!-- Create/Edit Activity -->
+      <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden" id="act-section">
+        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-purple-50 flex justify-between items-center">
+          <div>
+            <h2 id="act-form-title" class="font-bold text-slate-800">&#127775; Create New Activity</h2>
+            <p class="text-slate-500 text-xs mt-0.5">Descriptions are encrypted at rest in D1.</p>
+          </div>
+          <button type="button" id="btn-cancel-act" onclick="cancelEditActivity()" class="hidden text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-1 px-3 rounded-lg">Cancel Edit</button>
         </div>
         <div class="p-6">
           <form id="form-activity" class="space-y-4" novalidate>
@@ -100,55 +103,69 @@
             </div>
             <p id="act-err" class="text-red-500 text-sm hidden"></p>
             <p id="act-ok" class="text-emerald-600 text-sm hidden"></p>
-            <button type="submit" class="w-full bg-brand text-white font-semibold py-2.5 rounded-xl hover:bg-brand-dark transition text-sm">Create Activity</button>
+            <button type="submit" id="btn-submit-act" class="w-full bg-brand text-white font-semibold py-2.5 rounded-xl hover:bg-brand-dark transition text-sm">Create Activity</button>
           </form>
         </div>
       </section>
 
-      <!-- Create Session -->
-      <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50">
-          <h2 class="font-bold text-slate-800">&#128197; Add Session</h2>
-          <p class="text-slate-500 text-xs mt-0.5">Location and description are encrypted at rest.</p>
+      <!-- Add/Edit Session -->
+      <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden" id="ses-section">
+        <div class="px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-emerald-50 to-teal-50 flex justify-between items-center">
+          <div>
+            <h2 id="ses-form-title" class="font-bold text-slate-800">&#128197; Add Session</h2>
+            <p class="text-slate-500 text-xs mt-0.5">Location and description are encrypted at rest.</p>
+          </div>
+          <button type="button" id="btn-cancel-ses" onclick="cancelEditSession()" class="hidden text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-1 px-3 rounded-lg">Cancel Edit</button>
         </div>
         <div class="p-6">
           <form id="form-session" class="space-y-4" novalidate>
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1">Activity *</label>
-              <select id="s-activity" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm">
+              <select id="s-activity" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm" onchange="onActivitySelect()">
                 <option value="">Select one of your activities...</option>
               </select>
             </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1">Session Title *</label>
-              <input id="s-title" type="text" required
-                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm" placeholder="e.g. Week 1 - Introduction" />
+            
+            <div id="existing-sessions" class="hidden my-2">
+              <h3 class="block text-sm font-medium text-slate-700 mb-1">Existing Sessions</h3>
+              <ul id="s-session-list" class="divide-y divide-slate-100 text-sm border border-slate-200 rounded-lg max-h-40 overflow-y-auto"></ul>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            
+            <div class="mt-4 border-t pt-4 border-slate-100" id="ses-fields">
               <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">Start Time</label>
-                <input id="s-start" type="datetime-local"
-                  class="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm" />
+                <h3 id="ses-fields-title" class="block text-sm font-semibold text-slate-800 mb-2">New Session Details</h3>
               </div>
               <div>
-                <label class="block text-sm font-medium text-slate-700 mb-1">End Time</label>
-                <input id="s-end" type="datetime-local"
-                  class="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm" />
+                <label for="s-title" class="block text-sm font-medium text-slate-700 mb-1">Session Title *</label>
+                <input id="s-title" type="text" required
+                  class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm" placeholder="e.g. Week 1 - Introduction" />
               </div>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1">Location (encrypted)</label>
-              <input id="s-location" type="text"
-                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm" placeholder="e.g. Room 101 or Zoom link" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1">Description (encrypted)</label>
-              <textarea id="s-desc" rows="2"
-                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm resize-none" placeholder="What will be covered in this session?"></textarea>
+              <div class="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label for="s-start" class="block text-sm font-medium text-slate-700 mb-1">Start Time</label>
+                  <input id="s-start" type="datetime-local"
+                    class="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm" />
+                </div>
+                <div>
+                  <label for="s-end" class="block text-sm font-medium text-slate-700 mb-1">End Time</label>
+                  <input id="s-end" type="datetime-local"
+                    class="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm" />
+                </div>
+              </div>
+              <div class="mt-3">
+                <label for="s-location" class="block text-sm font-medium text-slate-700 mb-1">Location (encrypted)</label>
+                <input id="s-location" type="text"
+                  class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm" placeholder="e.g. Room 101 or Zoom link" />
+              </div>
+              <div class="mt-3">
+                <label for="s-desc" class="block text-sm font-medium text-slate-700 mb-1">Description (encrypted)</label>
+                <textarea id="s-desc" rows="2"
+                  class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand/40 text-sm resize-none" placeholder="What will be covered in this session?"></textarea>
+              </div>
             </div>
             <p id="ses-err" class="text-red-500 text-sm hidden"></p>
             <p id="ses-ok" class="text-emerald-600 text-sm hidden"></p>
-            <button type="submit" class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-xl hover:bg-emerald-700 transition text-sm">Add Session</button>
+            <button type="submit" id="btn-submit-ses" class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-xl hover:bg-emerald-700 transition text-sm">Add Session</button>
           </form>
         </div>
       </section>
@@ -239,6 +256,7 @@
           '</div>' +
         '</div>' +
         '<div class="flex gap-2 shrink-0">' +
+          '<button onclick="startEditActivity(\'' + esc(a.id) + '\')" class="text-xs text-slate-600 font-semibold border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50">Edit</button>' +
           '<a href="/course.html?id=' + esc(a.id) + '" class="text-xs text-brand font-semibold border border-brand/30 px-3 py-1.5 rounded-lg hover:bg-indigo-50">View</a>' +
         '</div>' +
       '</div>';
@@ -252,17 +270,65 @@
     setTimeout(() => el.classList.add('hidden'), 4000);
   }
 
+  let editActivityId = null;
+  let editSessionId = null;
+  let currentActivitySessions = [];
+  let activityEditLoadSeq = 0;
+  let sessionListLoadSeq = 0;
+
+  async function startEditActivity(id) {
+    const loadSeq = ++activityEditLoadSeq;
+    const a = hostedActivities.find(act => act.id === id);
+    if (!a) return;
+    
+    // fetch details and get description
+    const res = await fetch('/api/activities/' + id, { headers: { Authorization: 'Bearer ' + token } });
+    const data = await res.json();
+    if (loadSeq !== activityEditLoadSeq) return;
+    if (!res.ok) { showMsg('act-err', 'Failed to load activity details', true); return; }
+    
+    const fullAct = data.activity;
+    
+    document.getElementById('a-title').value = fullAct.title;
+    document.getElementById('a-desc').value = fullAct.description || '';
+    document.getElementById('a-type').value = fullAct.type;
+    document.getElementById('a-format').value = fullAct.format;
+    document.getElementById('a-schedule').value = fullAct.schedule_type;
+    document.getElementById('a-tags').value = (fullAct.tags || []).join(', ');
+    
+    document.getElementById('act-form-title').innerHTML = '&#9999;&#65039; Edit Activity';
+    document.getElementById('btn-submit-act').textContent = 'Update Activity';
+    document.getElementById('btn-cancel-act').classList.remove('hidden');
+    
+    editActivityId = id;
+    document.getElementById('act-section').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function cancelEditActivity() {
+    document.getElementById('form-activity').reset();
+    document.getElementById('act-form-title').innerHTML = '&#127775; Create New Activity';
+    document.getElementById('btn-submit-act').textContent = 'Create Activity';
+    document.getElementById('btn-cancel-act').classList.add('hidden');
+    editActivityId = null;
+  }
+
   document.getElementById('form-activity').addEventListener('submit', async e => {
     e.preventDefault();
     document.getElementById('act-err').classList.add('hidden');
     document.getElementById('act-ok').classList.add('hidden');
     const btn = e.target.querySelector('button[type=submit]');
-    btn.textContent = 'Creating...'; btn.disabled = true;
+    btn.textContent = editActivityId ? 'Updating...' : 'Creating...'; 
+    btn.disabled = true;
+    
     const rawTags = document.getElementById('a-tags').value;
     const tags = rawTags ? rawTags.split(',').map(t => t.trim()).filter(Boolean) : [];
+    
+    const method = editActivityId ? 'PUT' : 'POST';
+    const url = editActivityId ? `/api/activities/${editActivityId}` : '/api/activities';
+    
     try {
-      const res  = await fetch('/api/activities', {
-        method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + token },
+      const res  = await fetch(url, {
+        method, headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + token },
         body: JSON.stringify({
           title:         document.getElementById('a-title').value.trim(),
           description:   document.getElementById('a-desc').value.trim(),
@@ -274,25 +340,106 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
-      showMsg('act-ok', 'Activity created: ' + data.data.title, false);
-      e.target.reset();
+      
+      showMsg('act-ok', `Activity ${editActivityId ? 'updated' : 'created'} successfully!`, false);
+      cancelEditActivity();
       await loadHostedActivities();
     } catch (err) { showMsg('act-err', err.message, true); }
-    finally { btn.textContent = 'Create Activity'; btn.disabled = false; }
+    finally { btn.disabled = false; btn.textContent = editActivityId ? 'Update Activity' : 'Create Activity'; }
   });
+
+  async function onActivitySelect() {
+    const actId = document.getElementById('s-activity').value;
+    const loadSeq = ++sessionListLoadSeq;
+    const listDiv = document.getElementById('existing-sessions');
+    const ul = document.getElementById('s-session-list');
+    cancelEditSession();
+    
+    if (!actId) {
+      listDiv.classList.add('hidden');
+      return;
+    }
+
+    const res = await fetch('/api/activities/' + actId, { headers: { Authorization: 'Bearer ' + token } });
+    if (!res.ok) {
+      showMsg('ses-err', 'Failed to load sessions for this activity', true);
+      listDiv.classList.add('hidden');
+      return;
+    }
+    const data = await res.json();
+    if (loadSeq !== sessionListLoadSeq || document.getElementById('s-activity').value !== actId) return;
+    currentActivitySessions = data.sessions || [];
+    
+    if (currentActivitySessions.length === 0) {
+      listDiv.classList.add('hidden');
+    } else {
+      listDiv.classList.remove('hidden');
+      ul.innerHTML = currentActivitySessions.map(s => {
+        return `<li class="px-4 py-2 flex justify-between items-center bg-white hover:bg-slate-50">
+          <div>
+            <span class="font-semibold text-slate-800">${esc(s.title)}</span>
+            <div class="text-xs text-slate-500">${esc(s.start_time || '')}</div>
+          </div>
+          <button type="button" onclick="startEditSession('${esc(s.id)}')" class="text-xs text-brand font-semibold border border-brand/30 px-2 py-1 rounded hover:bg-indigo-50">Edit</button>
+        </li>`;
+      }).join('');
+    }
+  }
+
+  function startEditSession(id) {
+    const s = currentActivitySessions.find(ses => ses.id === id);
+    if (!s) return;
+    
+    document.getElementById('s-title').value = s.title;
+    document.getElementById('s-desc').value = s.description || '';
+    
+    // browsers require YYYY-MM-DDThh:mm format for datetime-local
+    const fmt = v => v ? String(v).replace(' ', 'T') : '';
+    document.getElementById('s-start').value = fmt(s.start_time);
+    document.getElementById('s-end').value = fmt(s.end_time);
+    document.getElementById('s-location').value = s.location || '';
+    
+    document.getElementById('ses-form-title').innerHTML = '&#9999;&#65039; Edit Session';
+    document.getElementById('ses-fields-title').textContent = 'Editing Session Details';
+    document.getElementById('btn-submit-ses').textContent = 'Update Session';
+    document.getElementById('btn-cancel-ses').classList.remove('hidden');
+    
+    editSessionId = id;
+  }
+
+  function cancelEditSession() {
+    document.getElementById('s-title').value = '';
+    document.getElementById('s-desc').value = '';
+    document.getElementById('s-start').value = '';
+    document.getElementById('s-end').value = '';
+    document.getElementById('s-location').value = '';
+    
+    document.getElementById('ses-form-title').innerHTML = '&#128197; Add Session';
+    document.getElementById('ses-fields-title').textContent = 'New Session Details';
+    document.getElementById('btn-submit-ses').textContent = 'Add Session';
+    document.getElementById('btn-cancel-ses').classList.add('hidden');
+    editSessionId = null;
+  }
 
   document.getElementById('form-session').addEventListener('submit', async e => {
     e.preventDefault();
     document.getElementById('ses-err').classList.add('hidden');
     document.getElementById('ses-ok').classList.add('hidden');
-    const btn = e.target.querySelector('button[type=submit]');
+    
     const actId = document.getElementById('s-activity').value;
     if (!actId) { showMsg('ses-err', 'Please select an activity', true); return; }
-    btn.textContent = 'Adding...'; btn.disabled = true;
+    
+    const btn = e.target.querySelector('button[type=submit]');
+    btn.textContent = editSessionId ? 'Updating...' : 'Adding...'; 
+    btn.disabled = true;
+    
     const fmt = v => v ? v.replace('T',' ') : '';
+    const method = editSessionId ? 'PUT' : 'POST';
+    const url = editSessionId ? `/api/sessions/${editSessionId}` : '/api/sessions';
+
     try {
-      const res  = await fetch('/api/sessions', {
-        method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + token },
+      const res  = await fetch(url, {
+        method, headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + token },
         body: JSON.stringify({
           activity_id: actId,
           title:       document.getElementById('s-title').value.trim(),
@@ -304,15 +451,14 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
-      showMsg('ses-ok', 'Session added successfully!', false);
-      document.getElementById('s-title').value    = '';
-      document.getElementById('s-desc').value     = '';
-      document.getElementById('s-start').value    = '';
-      document.getElementById('s-end').value      = '';
-      document.getElementById('s-location').value = '';
+      
+      showMsg('ses-ok', `Session ${editSessionId ? 'updated' : 'added'} successfully!`, false);
+      cancelEditSession();
       await loadHostedActivities();
+      document.getElementById('s-activity').value = actId;
+      await onActivitySelect(); // refresh session list
     } catch (err) { showMsg('ses-err', err.message, true); }
-    finally { btn.textContent = 'Add Session'; btn.disabled = false; }
+    finally { btn.textContent = editSessionId ? 'Update Session' : 'Add Session'; btn.disabled = false; }
   });
 </script>
 </body>
