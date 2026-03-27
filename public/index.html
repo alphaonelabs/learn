@@ -56,7 +56,7 @@
       Discover courses, meetups, workshops, and study groups — all on a platform where every piece of user data is encrypted at rest.
     </p>
     <div class="flex flex-col sm:flex-row gap-4 justify-center">
-      <a href="/login.html?tab=register" class="bg-white text-brand font-bold px-8 py-3 rounded-xl shadow hover:bg-indigo-50 transition">Join Free</a>
+      <a id="hero-cta" href="/login.html?tab=register" class="bg-white text-brand font-bold px-8 py-3 rounded-xl shadow hover:bg-indigo-50 transition">Join Free</a>
       <a href="#activities" class="border border-white/50 text-white font-semibold px-8 py-3 rounded-xl hover:bg-white/10 transition">Browse Activities</a>
     </div>
   </div>
@@ -166,7 +166,29 @@
         <a href="/login.html?tab=register" class="bg-brand text-white text-sm font-semibold px-4 py-1.5 rounded-lg hover:bg-brand-dark transition">Register</a>`;
     }
   }
-  function logout() { localStorage.removeItem('edu_token'); localStorage.removeItem('edu_user'); updateNav(); }
+
+  function updateHeroCta() {
+    const token = localStorage.getItem('edu_token');
+    const user  = JSON.parse(localStorage.getItem('edu_user') || 'null');
+    const heroCta = document.getElementById('hero-cta');
+    if (!heroCta) return;
+    
+    if (token && user) {
+      heroCta.href = '/dashboard.html';
+      heroCta.textContent = 'Go to Dashboard';
+    } else {
+      heroCta.href = '/login.html?tab=register';
+      heroCta.textContent = 'Join Free';
+    }
+  }
+
+  function logout() { 
+    localStorage.removeItem('edu_token'); 
+    localStorage.removeItem('edu_user'); 
+    updateNav(); 
+    updateHeroCta(); 
+  }
+  
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
   // ── Colours
@@ -273,6 +295,7 @@
     document.getElementById(id).addEventListener(id === 'search' ? 'input' : 'change', renderGrid));
 
   updateNav();
+  updateHeroCta();
   loadActivities();
 </script>
 </body>
