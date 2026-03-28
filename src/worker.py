@@ -404,7 +404,7 @@ _DDL = [
         end_time    TEXT,
         location    TEXT,
         created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-        FOREIGN KEY (activity_id) REFERENCES activities(id)
+        FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE
     )""",
     # Enrollments
     """CREATE TABLE IF NOT EXISTS enrollments (
@@ -450,6 +450,41 @@ _DDL = [
     "CREATE INDEX IF NOT EXISTS idx_sa_session           ON session_attendance(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_sa_user              ON session_attendance(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_at_activity          ON activity_tags(activity_id)",
+    # Assignments & Submissions
+    """CREATE TABLE IF NOT EXISTS assignments (
+        id           TEXT PRIMARY KEY,
+        activity_id  TEXT NOT NULL,
+        title        TEXT NOT NULL,
+        description  TEXT,
+        due_date     TEXT,
+        max_score    INTEGER NOT NULL DEFAULT 100,
+        status       TEXT NOT NULL DEFAULT 'draft',
+        allow_late   INTEGER NOT NULL DEFAULT 0,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at   TEXT,
+        FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE
+    )""",
+    """CREATE TABLE IF NOT EXISTS submissions (
+        id             TEXT PRIMARY KEY,
+        assignment_id  TEXT NOT NULL,
+        student_id     TEXT NOT NULL,
+        text_response  TEXT,
+        file_url       TEXT,
+        status         TEXT NOT NULL DEFAULT 'submitted',
+        score          INTEGER,
+        feedback       TEXT,
+        graded_by      TEXT,
+        graded_at      TEXT,
+        submitted_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at     TEXT,
+        UNIQUE (assignment_id, student_id),
+        FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id)    REFERENCES users(id),
+        FOREIGN KEY (graded_by)     REFERENCES users(id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_assignments_activity  ON assignments(activity_id)",
+    "CREATE INDEX IF NOT EXISTS idx_submissions_assignment ON submissions(assignment_id)",
+    "CREATE INDEX IF NOT EXISTS idx_submissions_student    ON submissions(student_id)",
 ]
 
 
@@ -1291,9 +1326,350 @@ async def _dispatch(request, env):
         if path == "/api/admin/table-counts" and method == "GET":
             return await api_admin_table_counts(request, env)
 
+        # Assignments
+        m_asgn = re.fullmatch(r"/api/activities/([A-Za-z0-9_-]+)/assignments", path)
+        if m_asgn:
+            aid = m_asgn.group(1)
+            if method == "GET":
+                return await api_list_assignments(request, env, aid)
+            if method == "POST":
+                return await api_create_assignment(request, env, aid)
+
+        m_asgn2 = re.fullmatch(r"/api/assignments/([A-Za-z0-9_-]+)$", path)
+        if m_asgn2:
+            asgn_id = m_asgn2.group(1)
+            if method == "GET":
+                return await api_get_assignment(request, env, asgn_id)
+            if method == "PUT":
+                return await api_update_assignment(request, env, asgn_id)
+            if method == "DELETE":
+                return await api_delete_assignment(request, env, asgn_id)
+
+        m_sub = re.fullmatch(r"/api/assignments/([A-Za-z0-9_-]+)/submit", path)
+        if m_sub:
+            if method == "POST":
+                return await api_submit_assignment(request, env, m_sub.group(1))
+
+        m_sub2 = re.fullmatch(r"/api/assignments/([A-Za-z0-9_-]+)/submissions", path)
+        if m_sub2:
+            if method == "GET":
+                return await api_list_submissions(request, env, m_sub2.group(1))
+
+        m_grade = re.fullmatch(r"/api/submissions/([A-Za-z0-9_-]+)/grade", path)
+        if m_grade:
+            if method == "POST":
+                return await api_grade_submission(request, env, m_grade.group(1))
+
         return err("API endpoint not found", 404)
 
     return await serve_static(path, env)
+
+
+# ---------------------------------------------------------------------------
+# Assignment API
+# ---------------------------------------------------------------------------
+
+async def api_list_assignments(req, env, activity_id: str):
+    """GET /api/activities/:id/assignments — list assignments for an activity."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    enc = env.ENCRYPTION_KEY
+    act = await env.DB.prepare("SELECT id, host_id FROM activities WHERE id=?").bind(activity_id).first()
+    if not act:
+        return err("Activity not found", 404)
+    is_host = user and act["host_id"] == user["id"]
+    if is_host:
+        rows = await env.DB.prepare(
+            "SELECT * FROM assignments WHERE activity_id=? ORDER BY created_at DESC"
+        ).bind(activity_id).all()
+    else:
+        rows = await env.DB.prepare(
+            "SELECT * FROM assignments WHERE activity_id=? AND status='published' ORDER BY created_at DESC"
+        ).bind(activity_id).all()
+    assignments = []
+    for r in rows.results or []:
+        sub_count = await env.DB.prepare(
+            "SELECT COUNT(*) as cnt FROM submissions WHERE assignment_id=?"
+        ).bind(r["id"]).first()
+        assignments.append({
+            "id": r["id"],
+            "title": r["title"],
+            "description": await decrypt_aes(r["description"] or "", enc),
+            "due_date": r["due_date"],
+            "max_score": r["max_score"],
+            "status": r["status"],
+            "allow_late": r["allow_late"],
+            "submission_count": sub_count["cnt"] if sub_count else 0,
+            "created_at": r["created_at"],
+        })
+    return ok(assignments)
+
+
+async def api_create_assignment(req, env, activity_id: str):
+    """POST /api/activities/:id/assignments — create assignment [host only]."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    enc = env.ENCRYPTION_KEY
+    act = await env.DB.prepare("SELECT id, host_id FROM activities WHERE id=?").bind(activity_id).first()
+    if not act:
+        return err("Activity not found", 404)
+    if act["host_id"] != user["id"]:
+        return err("Only the host can create assignments", 403)
+    body, bad = await parse_json_object(req)
+    if bad:
+        return bad
+    title = (body.get("title") or "").strip()
+    if not title:
+        return err("Title is required")
+    description = (body.get("description") or "").strip()
+    due_date = (body.get("due_date") or "").strip() or None
+    max_score = body.get("max_score", 100)
+    try:
+        max_score = max(1, min(1000, int(max_score)))
+    except (ValueError, TypeError):
+        max_score = 100
+    status = body.get("status", "draft")
+    if status not in ("draft", "published"):
+        status = "draft"
+    allow_late = 1 if body.get("allow_late") else 0
+    asgn_id = new_id()
+    try:
+        await env.DB.prepare(
+            "INSERT INTO assignments (id, activity_id, title, description, due_date, max_score, status, allow_late)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).bind(asgn_id, activity_id, title, await encrypt_aes(description, enc) if description else "",
+               due_date, max_score, status, allow_late).run()
+    except Exception as exc:
+        capture_exception(exc, where="api_create_assignment")
+        return err("Failed to create assignment", 500)
+    return ok({"id": asgn_id, "title": title, "status": status}, "Assignment created")
+
+
+async def api_get_assignment(req, env, asgn_id: str):
+    """GET /api/assignments/:id — get assignment details."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    enc = env.ENCRYPTION_KEY
+    r = await env.DB.prepare(
+        "SELECT a.*, act.host_id FROM assignments a"
+        " JOIN activities act ON act.id = a.activity_id WHERE a.id=?"
+    ).bind(asgn_id).first()
+    if not r:
+        return err("Assignment not found", 404)
+    is_host = user and r["host_id"] == user["id"]
+    if r["status"] == "draft" and not is_host:
+        return err("Assignment not found", 404)
+    result = {
+        "id": r["id"],
+        "activity_id": r["activity_id"],
+        "title": r["title"],
+        "description": await decrypt_aes(r["description"] or "", enc),
+        "due_date": r["due_date"],
+        "max_score": r["max_score"],
+        "status": r["status"],
+        "allow_late": r["allow_late"],
+        "created_at": r["created_at"],
+    }
+    if is_host:
+        sub_count = await env.DB.prepare(
+            "SELECT COUNT(*) as cnt FROM submissions WHERE assignment_id=?"
+        ).bind(asgn_id).first()
+        result["submission_count"] = sub_count["cnt"] if sub_count else 0
+    if user and not is_host:
+        sub = await env.DB.prepare(
+            "SELECT status, score, feedback, submitted_at FROM submissions"
+            " WHERE assignment_id=? AND student_id=?"
+        ).bind(asgn_id, user["id"]).first()
+        if sub:
+            result["my_submission"] = {
+                "status": sub["status"],
+                "score": sub["score"],
+                "feedback": await decrypt_aes(sub["feedback"] or "", enc),
+                "submitted_at": sub["submitted_at"],
+            }
+    return ok(result)
+
+
+async def api_update_assignment(req, env, asgn_id: str):
+    """PUT /api/assignments/:id — update assignment [host only]."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    enc = env.ENCRYPTION_KEY
+    r = await env.DB.prepare(
+        "SELECT a.*, act.host_id FROM assignments a"
+        " JOIN activities act ON act.id = a.activity_id WHERE a.id=?"
+    ).bind(asgn_id).first()
+    if not r:
+        return err("Assignment not found", 404)
+    if r["host_id"] != user["id"]:
+        return err("Only the host can update assignments", 403)
+    body, bad = await parse_json_object(req)
+    if bad:
+        return bad
+    title = (body.get("title") or r["title"]).strip()
+    description = body["description"].strip() if "description" in body else await decrypt_aes(r["description"] or "", enc)
+    due_date = body["due_date"] if "due_date" in body else r["due_date"]
+    max_score = body.get("max_score", r["max_score"])
+    try:
+        max_score = max(1, min(1000, int(max_score)))
+    except (ValueError, TypeError):
+        max_score = r["max_score"]
+    status = body.get("status", r["status"])
+    if status not in ("draft", "published"):
+        status = r["status"]
+    allow_late = int(body["allow_late"]) if "allow_late" in body else r["allow_late"]
+    await env.DB.prepare(
+        "UPDATE assignments SET title=?, description=?, due_date=?, max_score=?,"
+        " status=?, allow_late=?, updated_at=datetime('now') WHERE id=?"
+    ).bind(title, await encrypt_aes(description, enc) if description else "",
+           due_date, max_score, status, allow_late, asgn_id).run()
+    return ok({"id": asgn_id}, "Assignment updated")
+
+
+async def api_delete_assignment(req, env, asgn_id: str):
+    """DELETE /api/assignments/:id — delete assignment [host only]."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    r = await env.DB.prepare(
+        "SELECT a.id, act.host_id FROM assignments a"
+        " JOIN activities act ON act.id = a.activity_id WHERE a.id=?"
+    ).bind(asgn_id).first()
+    if not r:
+        return err("Assignment not found", 404)
+    if r["host_id"] != user["id"]:
+        return err("Only the host can delete assignments", 403)
+    await env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(asgn_id).run()
+    return ok(msg="Assignment deleted")
+
+
+async def api_submit_assignment(req, env, asgn_id: str):
+    """POST /api/assignments/:id/submit — submit assignment [enrolled students]."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    enc = env.ENCRYPTION_KEY
+    r = await env.DB.prepare(
+        "SELECT a.*, act.host_id FROM assignments a"
+        " JOIN activities act ON act.id = a.activity_id WHERE a.id=?"
+    ).bind(asgn_id).first()
+    if not r or r["status"] != "published":
+        return err("Assignment not found", 404)
+    if r["host_id"] == user["id"]:
+        return err("Hosts cannot submit to their own assignments", 403)
+    enr = await env.DB.prepare(
+        "SELECT id FROM enrollments WHERE activity_id=? AND user_id=? AND status='active'"
+    ).bind(r["activity_id"], user["id"]).first()
+    if not enr:
+        return err("You must be enrolled to submit", 403)
+    # Enforce due date
+    if r["due_date"] and not r["allow_late"]:
+        from datetime import datetime, timezone
+        try:
+            due = datetime.fromisoformat(r["due_date"].replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) > due:
+                return err("This assignment is past due and does not allow late submissions", 403)
+        except ValueError as exc:
+            capture_exception(exc, where="api_submit_assignment.due_date_parse")
+    body, bad = await parse_json_object(req)
+    if bad:
+        return bad
+    text_response = (body.get("text_response") or "").strip()
+    file_url = (body.get("file_url") or "").strip()
+    if not text_response and not file_url:
+        return err("Please provide a text response or file URL")
+    sub_id = new_id()
+    try:
+        await env.DB.prepare(
+            "INSERT INTO submissions (id, assignment_id, student_id, text_response, file_url)"
+            " VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(assignment_id, student_id) DO UPDATE SET"
+            " text_response=excluded.text_response, file_url=excluded.file_url,"
+            " status='submitted', score=NULL, feedback=NULL,"
+            " graded_by=NULL, graded_at=NULL, submitted_at=datetime('now'), updated_at=datetime('now')"
+        ).bind(
+            sub_id, asgn_id, user["id"],
+            await encrypt_aes(text_response, enc) if text_response else "",
+            await encrypt_aes(file_url, enc) if file_url else ""
+        ).run()
+    except Exception as exc:
+        capture_exception(exc, where="api_submit_assignment")
+        return err("Failed to submit assignment", 500)
+    return ok({"assignment_id": asgn_id}, "Assignment submitted")
+
+
+async def api_list_submissions(req, env, asgn_id: str):
+    """GET /api/assignments/:id/submissions — list submissions [host only]."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    enc = env.ENCRYPTION_KEY
+    r = await env.DB.prepare(
+        "SELECT a.*, act.host_id FROM assignments a"
+        " JOIN activities act ON act.id = a.activity_id WHERE a.id=?"
+    ).bind(asgn_id).first()
+    if not r:
+        return err("Assignment not found", 404)
+    if r["host_id"] != user["id"]:
+        return err("Only the host can view all submissions", 403)
+    rows = await env.DB.prepare(
+        "SELECT s.*, u.name as student_name_enc FROM submissions s"
+        " JOIN users u ON u.id = s.student_id WHERE s.assignment_id=?"
+        " ORDER BY s.submitted_at DESC"
+    ).bind(asgn_id).all()
+    submissions = []
+    for s in rows.results or []:
+        submissions.append({
+            "id": s["id"],
+            "student_id": s["student_id"],
+            "student_name": await decrypt_aes(s["student_name_enc"] or "", enc),
+            "text_response": await decrypt_aes(s["text_response"] or "", enc),
+            "file_url": await decrypt_aes(s["file_url"] or "", enc),
+            "status": s["status"],
+            "score": s["score"],
+            "feedback": await decrypt_aes(s["feedback"] or "", enc),
+            "submitted_at": s["submitted_at"],
+        })
+    return ok(submissions)
+
+
+async def api_grade_submission(req, env, sub_id: str):
+    """POST /api/submissions/:id/grade — grade a submission [host only]."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    enc = env.ENCRYPTION_KEY
+    s = await env.DB.prepare(
+        "SELECT s.*, a.max_score, act.host_id FROM submissions s"
+        " JOIN assignments a ON a.id = s.assignment_id"
+        " JOIN activities act ON act.id = a.activity_id"
+        " WHERE s.id=?"
+    ).bind(sub_id).first()
+    if not s:
+        return err("Submission not found", 404)
+    if s["host_id"] != user["id"]:
+        return err("Only the host can grade submissions", 403)
+    body, bad = await parse_json_object(req)
+    if bad:
+        return bad
+    try:
+        score = int(body.get("score", 0))
+        if score < 0 or score > s["max_score"]:
+            return err(f"Score must be between 0 and {s['max_score']}")
+    except (ValueError, TypeError):
+        return err("Score must be a number")
+    feedback = (body.get("feedback") or "").strip()
+    try:
+        await env.DB.prepare(
+            "UPDATE submissions SET score=?, feedback=?, status='graded',"
+            " graded_by=?, graded_at=datetime('now'), updated_at=datetime('now')"
+            " WHERE id=?"
+        ).bind(score, await encrypt_aes(feedback, enc) if feedback else "",
+               user["id"], sub_id).run()
+    except Exception as exc:
+        capture_exception(exc, where="api_grade_submission")
+        return err("Failed to grade submission", 500)
+    return ok({"submission_id": sub_id, "score": score}, "Submission graded")
 
 
 async def on_fetch(request, env):

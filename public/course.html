@@ -180,6 +180,8 @@
     if (data.is_host) {
       document.getElementById('act-action').innerHTML =
         '<a href="/teach.html?activity_id=' + esc(a.id) + '" class="bg-white text-brand font-bold px-6 py-2.5 rounded-xl shadow hover:bg-indigo-50 transition text-sm">Manage Activity</a>';
+      isHost = true;
+      document.getElementById('btn-create-assignment').classList.remove('hidden');
       document.getElementById('welcome-card').querySelector('#welcome-text').textContent =
         'You are the host of this activity. Use the Manage button to add sessions and update details.';
     } else if (data.is_enrolled) {
@@ -223,11 +225,193 @@
     }
   }
 
+
+  // Assignments
+  let currentAsgnId = null;
+  let currentSubId = null;
+  let isHost = false;
+
+  function esc2(s) { const d = document.createElement('div'); d.textContent = s||''; return d.innerHTML; }
+
+  async function loadAssignments() {
+    if (!actId) return;
+    try {
+      const headers = token ? { Authorization: 'Bearer ' + token } : {};
+      const res = await fetch('/api/activities/' + actId + '/assignments', { headers });
+      const data = await res.json();
+      if (res.ok) renderAssignments(data.data || []);
+    } catch(e) { console.error('loadAssignments', e); }
+  }
+
+  function renderAssignments(assignments) {
+    const list = document.getElementById('assignments-list');
+    if (!assignments.length) {
+      list.innerHTML = '<p class="text-slate-400 text-sm">No assignments yet.</p>';
+      return;
+    }
+    list.innerHTML = assignments.map(a => {
+      const due = a.due_date ? '<span class="text-xs text-slate-400">Due: ' + new Date(a.due_date).toLocaleDateString() + '</span>' : '';
+      const badge = a.status === 'published'
+        ? '<span class="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded-full">Published</span>'
+        : '<span class="px-2 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded-full">Draft</span>';
+      const hostActions = isHost
+        ? '<button type="button" class="asgn-view-btn text-xs text-indigo-500 hover:underline" data-id="' + a.id + '">Submissions (' + (a.submission_count||0) + ')</button>'
+        : (token ? '<button type="button" class="asgn-submit-btn text-xs text-indigo-500 hover:underline" data-id="' + a.id + '" data-title="' + esc2(a.title) + '">Submit</button>' : '');
+      return '<div class="bg-slate-50 rounded-xl p-4 border border-slate-100">' +
+        '<div class="flex items-start justify-between mb-1">' +
+          '<h3 class="font-semibold text-slate-800 text-sm">' + esc2(a.title) + '</h3>' +
+          '<div class="flex items-center gap-2">' + badge + '</div>' +
+        '</div>' +
+        (a.description ? '<p class="text-xs text-slate-500 mb-2">' + esc2(a.description) + '</p>' : '') +
+        '<div class="flex items-center justify-between">' +
+          '<div class="flex gap-3">' + due + '<span class="text-xs text-slate-400">Max: ' + a.max_score + ' pts</span></div>' +
+          hostActions +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function showCreateAssignment() {
+    document.getElementById('create-assignment-form').classList.remove('hidden');
+  }
+  function hideCreateAssignment() {
+    document.getElementById('create-assignment-form').classList.add('hidden');
+  }
+
+  async function createAssignment() {
+    const title = document.getElementById('asgn-title').value.trim();
+    if (!title) { alert('Title is required'); return; }
+    const payload = {
+      title,
+      description: document.getElementById('asgn-desc').value.trim(),
+      due_date: document.getElementById('asgn-due').value || null,
+      max_score: parseInt(document.getElementById('asgn-score').value) || 100,
+      status: document.getElementById('asgn-status').value,
+      allow_late: document.getElementById('asgn-late').checked,
+    };
+    try {
+      const res = await fetch('/api/activities/' + actId + '/assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        hideCreateAssignment();
+        document.getElementById('asgn-title').value = '';
+        document.getElementById('asgn-desc').value = '';
+        await loadAssignments();
+      } else { alert(data.error || 'Failed'); }
+    } catch(e) { alert(e.message); }
+  }
+
+  function showSubmitForm(asgnId, title) {
+    currentAsgnId = asgnId;
+    document.getElementById('submit-asgn-title').textContent = title;
+    document.getElementById('submit-form').classList.remove('hidden');
+    document.getElementById('submit-text').focus();
+  }
+  function hideSubmitForm() {
+    document.getElementById('submit-form').classList.add('hidden');
+    currentAsgnId = null;
+  }
+
+  async function submitAssignment() {
+    const text = document.getElementById('submit-text').value.trim();
+    if (!text) { alert('Please write a response'); return; }
+    try {
+      const res = await fetch('/api/assignments/' + currentAsgnId + '/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ text_response: text })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        hideSubmitForm();
+        document.getElementById('submit-text').value = '';
+        alert('Submitted successfully!');
+        await loadAssignments();
+      } else { alert(data.error || 'Failed'); }
+    } catch(e) { alert(e.message); }
+  }
+
+  async function viewSubmissions(asgnId) {
+    try {
+      const res = await fetch('/api/assignments/' + asgnId + '/submissions', {
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Failed'); return; }
+      const subs = data.data || [];
+      if (!subs.length) { alert('No submissions yet'); return; }
+      const list = document.getElementById('assignments-list');
+      list.innerHTML = '<button type="button" onclick="loadAssignments()" class="text-xs text-indigo-500 hover:underline mb-3 block">← Back to assignments</button>' +
+        subs.map(s => '<div class="bg-white rounded-xl p-4 border border-slate-200 mb-2">' +
+          '<div class="flex justify-between mb-1">' +
+            '<span class="font-semibold text-slate-800 text-sm">' + esc2(s.student_name) + '</span>' +
+            '<span class="text-xs ' + (s.status==='graded' ? 'text-green-600' : 'text-yellow-600') + '">' + s.status + (s.score !== null ? ' — ' + s.score + ' pts' : '') + '</span>' +
+          '</div>' +
+          '<p class="text-xs text-slate-500 mb-2">' + esc2(s.text_response) + '</p>' +
+          '<button type="button" class="grade-btn text-xs text-indigo-500 hover:underline" data-id="' + s.id + '">Grade</button>' +
+        '</div>').join('');
+    } catch(e) { alert(e.message); }
+  }
+
+  function showGradeForm(subId) {
+    currentSubId = subId;
+    document.getElementById('grade-form').classList.remove('hidden');
+    document.getElementById('grade-score').focus();
+  }
+  function hideGradeForm() {
+    document.getElementById('grade-form').classList.add('hidden');
+    currentSubId = null;
+  }
+
+  async function gradeSubmission() {
+    const score = parseInt(document.getElementById('grade-score').value);
+    const feedback = document.getElementById('grade-feedback').value.trim();
+    if (isNaN(score)) { alert('Please enter a score'); return; }
+    try {
+      const res = await fetch('/api/submissions/' + currentSubId + '/grade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ score, feedback })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const gradedSubId = currentSubId;
+        hideGradeForm();
+        alert('Graded successfully!');
+        if (gradedSubId) viewSubmissions(gradedSubId);
+      } else { alert(data.error || 'Failed'); }
+    } catch(e) { alert(e.message); }
+  }
+
+  // Delegated click handlers for assignment buttons
+  document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('asgn-view-btn')) {
+      viewSubmissions(e.target.dataset.id);
+    }
+    if (e.target.classList.contains('asgn-submit-btn')) {
+      showSubmitForm(e.target.dataset.id, e.target.dataset.title);
+    }
+    if (e.target.classList.contains('grade-btn')) {
+      showGradeForm(e.target.dataset.id);
+    }
+  });
+
+  // Load assignments after loadActivity() so isHost is set correctly
+  const _loadActivityOrig = window.loadActivity;
+  window.loadActivity = async function() {
+    await _loadActivityOrig.apply(this, arguments);
+    if (actId) await loadAssignments();
+  };
   if (!actId) {
     document.getElementById('act-title').textContent = 'No activity selected';
   } else {
     loadActivity().catch(e => { document.getElementById('act-title').textContent = 'Error: ' + e.message; });
   }
 </script>
+
 </body>
 </html>
