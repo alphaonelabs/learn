@@ -93,3 +93,20 @@ CREATE INDEX IF NOT EXISTS idx_sessions_activity    ON sessions(activity_id);
 CREATE INDEX IF NOT EXISTS idx_sa_session           ON session_attendance(session_id);
 CREATE INDEX IF NOT EXISTS idx_sa_user              ON session_attendance(user_id);
 CREATE INDEX IF NOT EXISTS idx_at_activity          ON activity_tags(activity_id);
+
+-- PEER CONNECTIONS
+CREATE TABLE IF NOT EXISTS peer_connections (
+    id            TEXT PRIMARY KEY,
+    requester_id  TEXT NOT NULL,
+    addressee_id  TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    message       TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT,
+    UNIQUE (requester_id, addressee_id),
+    FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_pc_requester ON peer_connections(requester_id);
+CREATE INDEX IF NOT EXISTS idx_pc_addressee ON peer_connections(addressee_id);
+CREATE INDEX IF NOT EXISTS idx_pc_status    ON peer_connections(status);
