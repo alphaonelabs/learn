@@ -93,3 +93,21 @@ CREATE INDEX IF NOT EXISTS idx_sessions_activity    ON sessions(activity_id);
 CREATE INDEX IF NOT EXISTS idx_sa_session           ON session_attendance(session_id);
 CREATE INDEX IF NOT EXISTS idx_sa_user              ON session_attendance(user_id);
 CREATE INDEX IF NOT EXISTS idx_at_activity          ON activity_tags(activity_id);
+
+-- COMMENTS (discussion threads on activities)
+CREATE TABLE IF NOT EXISTS comments (
+    id          TEXT PRIMARY KEY,
+    activity_id TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    body        TEXT NOT NULL,          -- encrypted
+    parent_id   TEXT,                   -- NULL = top-level, else reply
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT,
+    FOREIGN KEY (activity_id) REFERENCES activities(id),
+    FOREIGN KEY (user_id)     REFERENCES users(id),
+    FOREIGN KEY (parent_id)   REFERENCES comments(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_comments_activity ON comments(activity_id);
+CREATE INDEX IF NOT EXISTS idx_comments_parent   ON comments(parent_id);
+CREATE INDEX IF NOT EXISTS idx_comments_user     ON comments(user_id);

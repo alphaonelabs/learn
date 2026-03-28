@@ -223,11 +223,110 @@
     }
   }
 
+
+  // Comments
+  let replyToId = null;
+  function escHtml(s) { const d = document.createElement('div'); d.textContent = s||''; return d.innerHTML; }
+  async function loadComments() {
+    try {
+      const res  = await fetch('/api/activities/' + actId + '/comments');
+      const data = await res.json();
+      if (res.ok) renderComments(data.data || []);
+    } catch(e) { console.error('loadComments', e); }
+  }
+  function renderComments(comments) {
+    const top = comments.filter(c => !c.parent_id);
+    const byParent = {};
+    comments.filter(c => c.parent_id).forEach(c => {
+      byParent[c.parent_id] = byParent[c.parent_id] || [];
+      byParent[c.parent_id].push(c);
+    });
+    const list = document.getElementById('comments-list');
+    if (top.length === 0) {
+      list.innerHTML = '<p class="text-slate-400 text-sm">No comments yet. Be the first!</p>';
+      return;
+    }
+    list.innerHTML = top.map(c => renderComment(c, byParent)).join('');
+  }
+  function renderComment(c, byParent) {
+    const replies = (byParent[c.id] || []).map(r => renderComment(r, byParent)).join('');
+    const initial = (c.author || '?')[0].toUpperCase();
+    const date = new Date(c.created_at).toLocaleDateString();
+    const replyBtn = token
+      ? '<button type="button" class="reply-btn text-xs text-indigo-500 hover:underline" data-id="' + c.id + '" data-author="' + escHtml(c.author) + '">Reply</button>'
+      : '';
+    const replyThread = replies
+      ? '<div class="mt-3 pl-4 border-l-2 border-slate-100 space-y-3">' + replies + '</div>'
+      : '';
+    return '<div class="flex gap-3" id="comment-' + c.id + '">' +
+      '<div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm flex-shrink-0">' + initial + '</div>' +
+      '<div class="flex-1">' +
+        '<div class="flex items-center gap-2 mb-1">' +
+          '<span class="font-semibold text-slate-800 text-sm">' + escHtml(c.author) + '</span>' +
+          '<span class="text-xs text-slate-400">' + date + '</span>' +
+        '</div>' +
+        '<p class="text-slate-700 text-sm mb-1">' + escHtml(c.body) + '</p>' +
+        replyBtn + replyThread +
+      '</div></div>';
+  }
+  function startReply(commentId, author) {
+    replyToId = commentId;
+    const ind = document.getElementById('reply-indicator');
+    ind.classList.remove('hidden');
+    ind.innerHTML = 'Replying to <strong>' + escHtml(author) + '</strong> &mdash; <button type="button" onclick="cancelReply()" class="underline">cancel</button>';
+    document.getElementById('comment-input').focus();
+  }
+  function cancelReply() {
+    replyToId = null;
+    document.getElementById('reply-indicator').classList.add('hidden');
+  }
+  async function postComment() {
+    const input = document.getElementById('comment-input');
+    const body  = input.value.trim();
+    if (body.length === 0) return;
+    const btn = document.querySelector('#comment-form button[onclick="postComment()"]');
+    btn.textContent = 'Posting...'; btn.disabled = true;
+    try {
+      const payload = { body };
+      if (replyToId) payload.parent_id = replyToId;
+      const res  = await fetch('/api/activities/' + actId + '/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        input.value = '';
+        cancelReply();
+        await loadComments();
+      } else {
+        alert(data.error || 'Failed to post comment');
+      }
+    } catch (e) { alert(e.message); }
+    finally { btn.textContent = 'Post Comment'; btn.disabled = false; }
+  }
+  document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('reply-btn')) {
+      startReply(e.target.dataset.id, e.target.dataset.author);
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
+    if (token) {
+      const cf = document.getElementById('comment-form');
+      if (cf) cf.classList.remove('hidden');
+    } else {
+      const cl = document.getElementById('comment-login-cta');
+      if (cl) cl.classList.remove('hidden');
+    }
+    if (actId) loadComments();
+  });
   if (!actId) {
     document.getElementById('act-title').textContent = 'No activity selected';
   } else {
     loadActivity().catch(e => { document.getElementById('act-title').textContent = 'Error: ' + e.message; });
   }
 </script>
+
 </body>
 </html>
