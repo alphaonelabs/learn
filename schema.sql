@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     end_time    TEXT,
     location    TEXT,                     -- encrypted
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (activity_id) REFERENCES activities(id)
+    FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE
 );
 
 -- ENROLLMENTS (people joining activities)
@@ -93,3 +93,42 @@ CREATE INDEX IF NOT EXISTS idx_sessions_activity    ON sessions(activity_id);
 CREATE INDEX IF NOT EXISTS idx_sa_session           ON session_attendance(session_id);
 CREATE INDEX IF NOT EXISTS idx_sa_user              ON session_attendance(user_id);
 CREATE INDEX IF NOT EXISTS idx_at_activity          ON activity_tags(activity_id);
+
+-- ASSIGNMENTS (tasks created by activity hosts for enrolled students)
+CREATE TABLE IF NOT EXISTS assignments (
+    id           TEXT PRIMARY KEY,
+    activity_id  TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    description  TEXT,
+    due_date     TEXT,
+    max_score    INTEGER NOT NULL DEFAULT 100,
+    status       TEXT NOT NULL DEFAULT 'draft',
+    allow_late   INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT,
+    FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE
+);
+
+-- SUBMISSIONS (student responses to assignments)
+CREATE TABLE IF NOT EXISTS submissions (
+    id             TEXT PRIMARY KEY,
+    assignment_id  TEXT NOT NULL,
+    student_id     TEXT NOT NULL,
+    text_response  TEXT,
+    file_url       TEXT,
+    status         TEXT NOT NULL DEFAULT 'submitted',
+    score          INTEGER,
+    feedback       TEXT,
+    graded_by      TEXT,
+    graded_at      TEXT,
+    submitted_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT,
+    UNIQUE (assignment_id, student_id),
+    FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE CASCADE,
+    FOREIGN KEY (student_id)    REFERENCES users(id),
+    FOREIGN KEY (graded_by)     REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_assignments_activity  ON assignments(activity_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_assignment ON submissions(assignment_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_student    ON submissions(student_id);
