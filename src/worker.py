@@ -654,9 +654,13 @@ async def api_list_activities(req, env):
         "a.created_at,u.name AS host_name_enc,"
         "(SELECT COUNT(*) FROM enrollments WHERE activity_id=a.id AND status='active')"
         " AS participant_count,"
-        "(SELECT COUNT(*) FROM sessions WHERE activity_id=a.id) AS session_count"
+        "(SELECT COUNT(*) FROM sessions WHERE activity_id=a.id) AS session_count,"
+        "GROUP_CONCAT(t.name) AS tag_names"
         " FROM activities a JOIN users u ON a.host_id=u.id"
+        " LEFT JOIN activity_tags at2 ON at2.activity_id=a.id"
+        " LEFT JOIN tags t ON t.id=at2.tag_id"
     )
+    group_order = " GROUP BY a.id ORDER BY a.created_at DESC"
 
     if tag:
         tag_row = await env.DB.prepare(
@@ -665,25 +669,23 @@ async def api_list_activities(req, env):
         if not tag_row:
             return json_resp({"activities": []})
         res = await env.DB.prepare(
-            base_q
-            + " JOIN activity_tags at2 ON at2.activity_id=a.id"
-              " WHERE at2.tag_id=? ORDER BY a.created_at DESC"
+            base_q + " WHERE at2.tag_id=?" + group_order
         ).bind(tag_row.id).all()
     elif atype and fmt:
         res = await env.DB.prepare(
-            base_q + " WHERE a.type=? AND a.format=? ORDER BY a.created_at DESC"
+            base_q + " WHERE a.type=? AND a.format=?" + group_order
         ).bind(atype, fmt).all()
     elif atype:
         res = await env.DB.prepare(
-            base_q + " WHERE a.type=? ORDER BY a.created_at DESC"
+            base_q + " WHERE a.type=?" + group_order
         ).bind(atype).all()
     elif fmt:
         res = await env.DB.prepare(
-            base_q + " WHERE a.format=? ORDER BY a.created_at DESC"
+            base_q + " WHERE a.format=?" + group_order
         ).bind(fmt).all()
     else:
         res = await env.DB.prepare(
-            base_q + " ORDER BY a.created_at DESC"
+            base_q + group_order
         ).all()
 
     activities = []
@@ -696,12 +698,6 @@ async def api_list_activities(req, env):
         ):
             continue
 
-        t_res = await env.DB.prepare(
-            "SELECT t.name FROM tags t"
-            " JOIN activity_tags at2 ON at2.tag_id=t.id"
-            " WHERE at2.activity_id=?"
-        ).bind(row.id).all()
-
         activities.append({
             "id":                row.id,
             "title":             row.title,
@@ -712,7 +708,7 @@ async def api_list_activities(req, env):
             "host_name":         host_name,
             "participant_count": row.participant_count,
             "session_count":     row.session_count,
-            "tags":              [t.name for t in (t_res.results or [])],
+            "tags":              row.tag_names.split(",") if row.tag_names else [],
             "created_at":        row.created_at,
         })
 
@@ -907,16 +903,16 @@ async def api_dashboard(req, env):
         "SELECT a.id,a.title,a.type,a.format,a.schedule_type,a.created_at,"
         "(SELECT COUNT(*) FROM enrollments WHERE activity_id=a.id AND status='active')"
         " AS participant_count,"
-        "(SELECT COUNT(*) FROM sessions WHERE activity_id=a.id) AS session_count"
-        " FROM activities a WHERE a.host_id=? ORDER BY a.created_at DESC"
+        "(SELECT COUNT(*) FROM sessions WHERE activity_id=a.id) AS session_count,"
+        "GROUP_CONCAT(t.name) AS tag_names"
+        " FROM activities a"
+        " LEFT JOIN activity_tags at2 ON at2.activity_id=a.id"
+        " LEFT JOIN tags t ON t.id=at2.tag_id"
+        " WHERE a.host_id=? GROUP BY a.id ORDER BY a.created_at DESC"
     ).bind(user["id"]).all()
 
     hosted = []
     for r in res.results or []:
-        t_res = await env.DB.prepare(
-            "SELECT t.name FROM tags t JOIN activity_tags at2 ON at2.tag_id=t.id"
-            " WHERE at2.activity_id=?"
-        ).bind(r.id).all()
         hosted.append({
             "id":                r.id,
             "title":             r.title,
@@ -925,26 +921,25 @@ async def api_dashboard(req, env):
             "schedule_type":     r.schedule_type,
             "participant_count": r.participant_count,
             "session_count":     r.session_count,
-            "tags":              [t.name for t in (t_res.results or [])],
+            "tags":              r.tag_names.split(",") if r.tag_names else [],
             "created_at":        r.created_at,
         })
 
     res2 = await env.DB.prepare(
         "SELECT a.id,a.title,a.type,a.format,a.schedule_type,"
         "e.role AS enr_role,e.status AS enr_status,e.created_at AS joined_at,"
-        "u.name AS host_name_enc"
+        "u.name AS host_name_enc,"
+        "GROUP_CONCAT(t.name) AS tag_names"
         " FROM enrollments e"
         " JOIN activities a ON e.activity_id=a.id"
         " JOIN users u ON a.host_id=u.id"
-        " WHERE e.user_id=? ORDER BY e.created_at DESC"
+        " LEFT JOIN activity_tags at2 ON at2.activity_id=a.id"
+        " LEFT JOIN tags t ON t.id=at2.tag_id"
+        " WHERE e.user_id=? GROUP BY a.id ORDER BY e.created_at DESC"
     ).bind(user["id"]).all()
 
     joined = []
     for r in res2.results or []:
-        t_res = await env.DB.prepare(
-            "SELECT t.name FROM tags t JOIN activity_tags at2 ON at2.tag_id=t.id"
-            " WHERE at2.activity_id=?"
-        ).bind(r.id).all()
         joined.append({
             "id":            r.id,
             "title":         r.title,
@@ -954,7 +949,7 @@ async def api_dashboard(req, env):
             "enr_role":      r.enr_role,
             "enr_status":    r.enr_status,
             "host_name":     decrypt(r.host_name_enc or "", enc),
-            "tags":          [t.name for t in (t_res.results or [])],
+            "tags":          r.tag_names.split(",") if r.tag_names else [],
             "joined_at":     r.joined_at,
         })
 
