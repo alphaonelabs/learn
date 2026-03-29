@@ -450,6 +450,23 @@ _DDL = [
     "CREATE INDEX IF NOT EXISTS idx_sa_session           ON session_attendance(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_sa_user              ON session_attendance(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_at_activity          ON activity_tags(activity_id)",
+    # Peer Connections
+    """CREATE TABLE IF NOT EXISTS peer_connections (
+        id            TEXT PRIMARY KEY,
+        requester_id  TEXT NOT NULL,
+        addressee_id  TEXT NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'pending',
+        message       TEXT,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at    TEXT,
+        UNIQUE (requester_id, addressee_id),
+        FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_pc_requester ON peer_connections(requester_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pc_addressee ON peer_connections(addressee_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pc_status    ON peer_connections(status)",
+
 ]
 
 
@@ -1291,6 +1308,27 @@ async def _dispatch(request, env):
         if path == "/api/admin/table-counts" and method == "GET":
             return await api_admin_table_counts(request, env)
 
+
+        # Peer Connections
+        if path == "/api/peers/suggestions" and method == "GET":
+            return await api_peer_suggestions(request, env)
+        if path == "/api/peers" and method == "GET":
+            return await api_list_peers(request, env)
+        if path == "/api/peers/requests" and method == "GET":
+            return await api_list_peer_requests(request, env)
+        m_pc1 = re.fullmatch(r"/api/peers/request/([A-Za-z0-9_-]+)", path)
+        if m_pc1 and method == "POST":
+            return await api_send_peer_request(request, env, m_pc1.group(1))
+        m_pc2 = re.fullmatch(r"/api/peers/([A-Za-z0-9_-]+)/accept", path)
+        if m_pc2 and method == "POST":
+            return await api_accept_peer_request(request, env, m_pc2.group(1))
+        m_pc3 = re.fullmatch(r"/api/peers/([A-Za-z0-9_-]+)/decline", path)
+        if m_pc3 and method == "POST":
+            return await api_decline_peer_request(request, env, m_pc3.group(1))
+        m_pc4 = re.fullmatch(r"/api/peers/([A-Za-z0-9_-]+)", path)
+        if m_pc4 and method == "DELETE":
+            return await api_remove_peer(request, env, m_pc4.group(1))
+
         return err("API endpoint not found", 404)
 
     return await serve_static(path, env)
@@ -1302,3 +1340,200 @@ async def on_fetch(request, env):
     except Exception as e:
         capture_exception(e, request, env, "on_fetch_unhandled")
         return err("Internal server error", 500)
+
+# ---------------------------------------------------------------------------
+# Peer Connections API
+# ---------------------------------------------------------------------------
+
+
+async def api_peer_suggestions(req, env):
+    """GET /api/peers/suggestions — suggest users from shared activities."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    enc = env.ENCRYPTION_KEY
+    rows = await env.DB.prepare(
+        "SELECT u.id AS user_id, u.name AS name_enc, MIN(a.title) AS activity_title"
+        " FROM enrollments e1"
+        " JOIN enrollments e2 ON e2.activity_id=e1.activity_id AND e2.user_id != e1.user_id"
+        " JOIN users u ON u.id=e2.user_id"
+        " JOIN activities a ON a.id=e1.activity_id"
+        " WHERE e1.user_id=? AND e1.status='active' AND e2.status='active'"
+        " AND e2.user_id NOT IN ("
+        "   SELECT CASE WHEN requester_id=? THEN addressee_id ELSE requester_id END"
+        "   FROM peer_connections WHERE requester_id=? OR addressee_id=?"
+        " )"
+        " GROUP BY u.id, u.name"
+        " LIMIT 20"
+    ).bind(user["id"], user["id"], user["id"], user["id"]).all()
+    suggestions = []
+    for r in rows.results or []:
+        suggestions.append({
+            "user_id": r["user_id"],
+            "name": await decrypt_aes(r["name_enc"] or "", enc),
+            "shared_activity": r["activity_title"],
+        })
+    return ok(suggestions)
+
+async def api_list_peers(req, env):
+    """GET /api/peers — list accepted connections."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    enc = env.ENCRYPTION_KEY
+    rows = await env.DB.prepare(
+        "SELECT pc.id, pc.created_at,"
+        " CASE WHEN pc.requester_id=? THEN pc.addressee_id ELSE pc.requester_id END AS peer_id,"
+        " u.name AS peer_name_enc"
+        " FROM peer_connections pc"
+        " JOIN users u ON u.id = CASE WHEN pc.requester_id=? THEN pc.addressee_id ELSE pc.requester_id END"
+        " WHERE (pc.requester_id=? OR pc.addressee_id=?) AND pc.status='accepted'"
+        " ORDER BY pc.created_at DESC"
+    ).bind(user["id"], user["id"], user["id"], user["id"]).all()
+    peers = []
+    for r in rows.results or []:
+        peers.append({
+            "connection_id": r["id"],
+            "peer_id": r["peer_id"],
+            "peer_name": await decrypt_aes(r["peer_name_enc"] or "", enc),
+            "connected_at": r["created_at"],
+        })
+    return ok(peers)
+
+
+async def api_list_peer_requests(req, env):
+    """GET /api/peers/requests — list pending incoming requests."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    enc = env.ENCRYPTION_KEY
+    rows = await env.DB.prepare(
+        "SELECT pc.id, pc.message, pc.created_at, u.name AS requester_name_enc, pc.requester_id"
+        " FROM peer_connections pc"
+        " JOIN users u ON u.id = pc.requester_id"
+        " WHERE pc.addressee_id=? AND pc.status='pending'"
+        " ORDER BY pc.created_at DESC"
+    ).bind(user["id"]).all()
+    requests = []
+    for r in rows.results or []:
+        requests.append({
+            "connection_id": r["id"],
+            "requester_id": r["requester_id"],
+            "requester_name": await decrypt_aes(r["requester_name_enc"] or "", enc),
+            "message": r["message"] or "",
+            "requested_at": r["created_at"],
+        })
+    return ok(requests)
+
+
+async def api_send_peer_request(req, env, addressee_id: str):
+    """POST /api/peers/request/:id — send a connection request."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    if user["id"] == addressee_id:
+        return err("You cannot connect with yourself", 400)
+    addressee = await env.DB.prepare("SELECT id FROM users WHERE id=?").bind(addressee_id).first()
+    if not addressee:
+        return err("User not found", 404)
+    # Verify shared activity
+    shared = await env.DB.prepare(
+        "SELECT e1.activity_id FROM enrollments e1"
+        " JOIN enrollments e2 ON e2.activity_id=e1.activity_id"
+        " WHERE e1.user_id=? AND e2.user_id=? AND e1.status='active' AND e2.status='active'"
+        " LIMIT 1"
+    ).bind(user["id"], addressee_id).first()
+    if not shared:
+        return err("You must share an activity with this user to connect", 403)
+    existing = await env.DB.prepare(
+        "SELECT id, status FROM peer_connections"
+        " WHERE (requester_id=? AND addressee_id=?) OR (requester_id=? AND addressee_id=?)"
+    ).bind(user["id"], addressee_id, addressee_id, user["id"]).first()
+    if existing:
+        if existing["status"] == "accepted":
+            return err("Already connected", 409)
+        if existing["status"] == "pending":
+            return err("Connection request already sent", 409)
+        if existing["status"] == "declined":
+            return err("Your previous request was declined", 409)
+    content_type = req.headers.get("content-type") or ""
+    if "application/json" in content_type:
+        try:
+            body = await req.json()
+            if not isinstance(body, dict):
+                return err("Request body must be a JSON object", 400)
+        except Exception:
+            return err("Invalid JSON in request body", 400)
+    else:
+        body = {}
+    raw_msg = body.get("message")
+    message = (raw_msg.strip()[:200] if isinstance(raw_msg, str) else "")
+    conn_id = new_id()
+    try:
+        await env.DB.prepare(
+            "INSERT INTO peer_connections (id, requester_id, addressee_id, message)"
+            " VALUES (?, ?, ?, ?)"
+        ).bind(conn_id, user["id"], addressee_id, message).run()
+    except Exception as exc:
+        capture_exception(exc, req, env, "api_send_peer_request.insert")
+        return err("Failed to send request", 500)
+    return ok({"connection_id": conn_id}, "Connection request sent")
+
+
+async def api_accept_peer_request(req, env, connection_id: str):
+    """POST /api/peers/:id/accept — accept a pending request."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    pc = await env.DB.prepare(
+        "SELECT id, status FROM peer_connections WHERE id=? AND addressee_id=?"
+    ).bind(connection_id, user["id"]).first()
+    if not pc:
+        return err("Connection request not found", 404)
+    if pc["status"] != "pending":
+        return err("Request is not pending", 409)
+    try:
+        await env.DB.prepare(
+            "UPDATE peer_connections SET status='accepted', updated_at=datetime('now') WHERE id=?"
+        ).bind(connection_id).run()
+    except Exception as exc:
+        capture_exception(exc, req, env, "api_accept_peer_request.update")
+        return err("Failed to accept request", 500)
+    return ok(msg="Connection accepted")
+
+
+async def api_decline_peer_request(req, env, connection_id: str):
+    """POST /api/peers/:id/decline — decline a pending request."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    pc = await env.DB.prepare(
+        "SELECT id, status FROM peer_connections WHERE id=? AND addressee_id=?"
+    ).bind(connection_id, user["id"]).first()
+    if not pc:
+        return err("Connection request not found", 404)
+    if pc["status"] != "pending":
+        return err("Request is not pending", 409)
+    try:
+        await env.DB.prepare(
+            "UPDATE peer_connections SET status='declined', updated_at=datetime('now') WHERE id=?"
+        ).bind(connection_id).run()
+    except Exception as exc:
+        capture_exception(exc, req, env, "api_decline_peer_request.update")
+        return err("Failed to decline request", 500)
+    return ok(msg="Connection declined")
+
+
+async def api_remove_peer(req, env, connection_id: str):
+    """DELETE /api/peers/:id — remove an accepted connection."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+    pc = await env.DB.prepare(
+        "SELECT id FROM peer_connections"
+        " WHERE id=? AND (requester_id=? OR addressee_id=?) AND status='accepted'"
+    ).bind(connection_id, user["id"], user["id"]).first()
+    if not pc:
+        return err("Connection not found", 404)
+    await env.DB.prepare("DELETE FROM peer_connections WHERE id=?").bind(connection_id).run()
+    return ok(msg="Connection removed")

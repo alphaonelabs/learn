@@ -57,6 +57,36 @@
     <a id="empty-action-link" href="/" class="mt-4 inline-block text-brand font-semibold hover:underline" id="empty-action-text">Browse activities</a>
   </div>
   <div id="joined-section"></div>
+  <!-- Peer Connections Section -->
+  <div class="mt-8 bg-white rounded-2xl shadow-sm border border-slate-100 p-6" id="peers-section">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="font-bold text-slate-800 text-lg">&#128101; Peer Connections</h2>
+      <span id="peer-requests-badge" class="hidden bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full"></span>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex gap-2 mb-4 border-b border-slate-100">
+      <button type="button" role="tab" aria-selected="true" onclick="showPeerTab('connections')" id="tab-connections" class="peer-tab px-4 py-2 text-sm font-semibold text-indigo-600 border-b-2 border-indigo-600">My Peers</button>
+      <button type="button" role="tab" aria-selected="false" onclick="showPeerTab('requests')" id="tab-requests" class="peer-tab px-4 py-2 text-sm font-semibold text-slate-400 border-b-2 border-transparent">Requests</button>
+      <button type="button" role="tab" aria-selected="false" onclick="showPeerTab('find')" id="tab-find" class="peer-tab px-4 py-2 text-sm font-semibold text-slate-400 border-b-2 border-transparent">Find Peers</button>
+    </div>
+
+    <!-- My Connections -->
+    <div id="peers-connections" class="peer-panel">
+      <div id="peers-list" class="space-y-3"></div>
+    </div>
+
+    <!-- Incoming Requests -->
+    <div id="peers-requests" class="peer-panel hidden">
+      <div id="requests-list" class="space-y-3"></div>
+    </div>
+
+    <!-- Find Peers -->
+    <div id="peers-find" class="peer-panel hidden">
+      <p class="text-sm text-slate-500 mb-3">Connect with other learners from your activities.</p>
+      <div id="suggestions-list" class="space-y-3"></div>
+    </div>
+  </div>
 </main>
 
 <footer class="bg-slate-800 text-slate-400 py-6 text-center text-sm mt-10">
@@ -173,6 +203,148 @@
     document.getElementById('activities-list').innerHTML =
       '<p class="col-span-3 text-red-400 text-sm">Failed to load dashboard: ' + e.message + '</p>';
   });
+</script>
+
+<script>
+
+
+  // Peer Connections
+  async function loadPeers() {
+    if (!token) return;
+    try {
+      const [peersRes, reqRes] = await Promise.all([
+        fetch('/api/peers', { headers: { Authorization: 'Bearer ' + token } }),
+        fetch('/api/peers/requests', { headers: { Authorization: 'Bearer ' + token } })
+      ]);
+      const peersData = await peersRes.json();
+      const reqData = await reqRes.json();
+      renderPeers(peersData.data || []);
+      renderRequests(reqData.data || []);
+      const badge = document.getElementById('peer-requests-badge');
+      const count = (reqData.data || []).length;
+      if (count > 0) { badge.textContent = count; badge.classList.remove('hidden'); }
+      else { badge.classList.add('hidden'); }
+    } catch(e) { console.error('loadPeers', e); }
+  }
+
+  function renderPeers(peers) {
+    const list = document.getElementById('peers-list');
+    if (!peers.length) { list.innerHTML = '<p class="text-slate-400 text-sm">No connections yet. Find peers to connect!</p>'; return; }
+    list.innerHTML = peers.map(p => {
+      const initial = (p.peer_name || '?')[0].toUpperCase();
+      return '<div class="flex items-center justify-between bg-slate-50 rounded-xl p-3 border border-slate-100">' +
+        '<div class="flex items-center gap-3">' +
+          '<div class="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm">' + initial + '</div>' +
+          '<span class="font-semibold text-slate-800 text-sm">' + escP(p.peer_name) + '</span>' +
+        '</div>' +
+        '<button type="button" onclick="removePeer(\'' + p.connection_id + '\')" class="text-xs text-red-400 hover:text-red-600">Remove</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  function renderRequests(requests) {
+    const list = document.getElementById('requests-list');
+    if (!requests.length) { list.innerHTML = '<p class="text-slate-400 text-sm">No pending requests.</p>'; return; }
+    list.innerHTML = requests.map(r => {
+      const initial = (r.requester_name || '?')[0].toUpperCase();
+      return '<div class="bg-slate-50 rounded-xl p-3 border border-slate-100">' +
+        '<div class="flex items-center gap-3 mb-2">' +
+          '<div class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 font-bold text-sm">' + initial + '</div>' +
+          '<span class="font-semibold text-slate-800 text-sm">' + escP(r.requester_name) + '</span>' +
+        '</div>' +
+        (r.message ? '<p class="text-xs text-slate-500 mb-2 italic">"' + escP(r.message) + '"</p>' : '') +
+        '<div class="flex gap-2">' +
+          '<button type="button" onclick="acceptRequest(\'' + r.connection_id + '\')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">Accept</button>' +
+          '<button type="button" onclick="declineRequest(\'' + r.connection_id + '\')" class="bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold px-3 py-1.5 rounded-lg transition">Decline</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function escP(s) { const d = document.createElement('div'); d.textContent = s||''; return d.innerHTML; }
+
+  function showPeerTab(tab) {
+    document.querySelectorAll('.peer-panel').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('.peer-tab').forEach(t => {
+      t.classList.remove('text-indigo-600', 'border-indigo-600');
+      t.classList.add('text-slate-400', 'border-transparent');
+      t.setAttribute('aria-selected', 'false');
+    });
+    document.getElementById('peers-' + tab).classList.remove('hidden');
+    const btn = document.getElementById('tab-' + tab);
+    btn.classList.remove('text-slate-400', 'border-transparent');
+    btn.classList.add('text-indigo-600', 'border-indigo-600');
+    btn.setAttribute('aria-selected', 'true');
+    if (tab === 'find') loadSuggestions();
+  }
+
+  async function loadSuggestions() {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/peers/suggestions', { headers: { Authorization: 'Bearer ' + token } });
+      const data = await res.json();
+      const list = document.getElementById('suggestions-list');
+      const suggestions = data.data || [];
+      if (!suggestions.length) { list.innerHTML = '<p class="text-slate-400 text-sm">No suggestions yet — join activities to find peers.</p>'; return; }
+      list.innerHTML = suggestions.map(s => {
+        const initial = (s.name || '?')[0].toUpperCase();
+        return '<div class="flex items-center justify-between bg-slate-50 rounded-xl p-3 border border-slate-100">' +
+          '<div class="flex items-center gap-3">' +
+            '<div class="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm">' + initial + '</div>' +
+            '<div>' +
+              '<span class="font-semibold text-slate-800 text-sm block">' + escP(s.name) + '</span>' +
+              '<span class="text-xs text-slate-400">' + escP(s.shared_activity) + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<button type="button" onclick="sendRequest(\'' + s.user_id + '\')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">Connect</button>' +
+        '</div>';
+      }).join('');
+    } catch(e) { console.error('loadSuggestions', e); }
+  }
+
+  async function sendRequest(userId) {
+    try {
+      const res = await fetch('/api/peers/request/' + userId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (res.ok) { alert('Connection request sent!'); await loadSuggestions(); }
+      else { alert(data.error || 'Failed'); }
+    } catch(e) { alert(e.message); }
+  }
+
+  async function acceptRequest(connId) {
+    try {
+      const res = await fetch('/api/peers/' + connId + '/accept', { method: 'POST', headers: { Authorization: 'Bearer ' + token } });
+      if (res.ok) { await loadPeers(); showPeerTab('connections'); }
+      else { const d = await res.json(); alert(d.error || 'Failed'); }
+    } catch(e) { alert(e.message); }
+  }
+
+  async function declineRequest(connId) {
+    try {
+      const res = await fetch('/api/peers/' + connId + '/decline', { method: 'POST', headers: { Authorization: 'Bearer ' + token } });
+      if (res.ok) await loadPeers();
+      else { const d = await res.json(); alert(d.error || 'Failed'); }
+    } catch(e) { alert(e.message); }
+  }
+
+  async function removePeer(connId) {
+    if (!confirm('Remove this connection?')) return;
+    try {
+      const res = await fetch('/api/peers/' + connId, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+      if (res.ok) await loadPeers();
+      else { const d = await res.json(); alert(d.error || 'Failed'); }
+    } catch(e) { alert(e.message); }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    if (token) loadPeers();
+  });
+
+
 </script>
 </body>
 </html>
