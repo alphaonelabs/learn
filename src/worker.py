@@ -563,6 +563,8 @@ async def api_register(req, env):
 
     if not username or not email or not password:
         return err("username, email, and password are required")
+    if not re.fullmatch(r"[a-zA-Z0-9_]{3,30}", username):
+        return err("Username must be 3-30 characters and contain only letters, numbers, or underscores")
     if len(password) < 8:
         return err("Password must be at least 8 characters")
 
@@ -870,12 +872,11 @@ async def api_join(req, env):
         return bad_resp
 
     act_id = body.get("activity_id")
-    role   = (body.get("role") or "participant").strip()
 
     if not act_id:
         return err("activity_id is required")
-    if role not in ("participant", "instructor", "organizer"):
-        role = "participant"
+
+    role = "participant"
 
     act = await env.DB.prepare(
         "SELECT id FROM activities WHERE id=?"
