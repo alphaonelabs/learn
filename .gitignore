@@ -17,6 +17,7 @@ venv/
 .env
 .env.local
 .dev.vars
+!.env.sample
 
 # OS
 .DS_Store
@@ -27,3 +28,4 @@ Thumbs.db
 .idea/
 *.swp
 .env*
+!.env.sample
