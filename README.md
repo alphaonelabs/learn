@@ -79,7 +79,7 @@ This project requires environment variables for encryption and authentication.
 
 #### For Local Development
 
-Create a `.dev.vars` file in the root of the project to store local secrets.
+Copy `.dev.vars.sample` to `.dev.vars` in the project root, then replace the placeholder values with your own secrets.
 
 ```
 ENCRYPTION_KEY=your-dev-encryption-key
