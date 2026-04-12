@@ -1136,7 +1136,7 @@ async def _dispatch(request, env):
     global _CORS_ORIGIN_INITIALISED
     if not _CORS_ORIGIN_INITIALISED:
         _CORS_ORIGIN_INITIALISED = True
-        origin = getattr(env, "ALLOWED_ORIGIN", "")
+        origin = (getattr(env, "ALLOWED_ORIGIN", "") or "").strip()
         _CORS["Access-Control-Allow-Origin"] = origin if origin else "*"
 
     path   = urlparse(request.url).path
