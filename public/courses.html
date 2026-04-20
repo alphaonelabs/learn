@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Courses — Alpha One Labs</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/waitingroom.css"/>
+<style>
+  .page-inner{max-width:1100px;}
+  .page-header h1{font-size:24px;}
+  .courses-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;}
+  .course-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px 16px 14px;box-shadow:0 2px 10px rgba(0,0,0,.04);}
+  .course-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+  .course-title{font-size:16px;font-weight:700;color:#111827;margin:0;}
+  .course-meta{margin-top:6px;color:#6b7280;font-size:13px;display:flex;gap:10px;flex-wrap:wrap;}
+  .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #e5e7eb;border-radius:999px;padding:2px 10px;font-size:12px;color:#374151;background:#f9fafb;}
+  .course-actions{display:flex;gap:8px;align-items:center;margin-top:12px;}
+  .btn-small{border:1px solid #0d9488;background:transparent;color:#0d9488;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;}
+  .btn-small:hover{background:#0d9488;color:#fff;}
+  .btn-ghost{border:1px solid #e5e7eb;color:#374151;background:#fff;}
+  .btn-ghost:hover{background:#f9fafb;color:#111827;border-color:#d1d5db;}
+  details{margin-top:12px;border-top:1px solid #eef2f7;padding-top:10px;}
+  summary{cursor:pointer;color:#111827;font-weight:700;font-size:13px;list-style:none;}
+  summary::-webkit-details-marker{display:none;}
+  .sessions{margin-top:10px;display:flex;flex-direction:column;gap:8px;}
+  .session{border:1px solid #e5e7eb;border-radius:8px;padding:10px 10px;background:#fff;}
+  .session-title{font-weight:700;font-size:13px;color:#111827;margin:0 0 4px;}
+  .session-sub{color:#6b7280;font-size:12px;}
+  .highlight{outline:3px solid rgba(99,102,241,.35);border-color:rgba(99,102,241,.5);}
+  .empty{color:#6b7280;font-size:14px;padding:18px;background:#fff;border:1px dashed #e5e7eb;border-radius:10px;}
+  @media(max-width:900px){.courses-grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<!-- NAV (same family as waitingroom.html) -->
+<nav>
+  <a href="#" class="nav-logo">
+    <img class="nav-logo-box" alt="Alpha One Labs logo" src="/images/logo.png"/>
+    Alpha One Labs
+  </a>
+  <div class="nav-links">
+    <a href="#">LEARN ▾</a>
+    <a href="/courses.html">COURSES</a>
+    <a href="#">COMMUNITY ▾</a>
+    <a href="#">RESOURCES ▾</a>
+    <a href="#">ABOUT ▾</a>
+  </div>
+  <div class="nav-search">
+    <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="text" placeholder="What do you want to learn?"/>
+  </div>
+  <div class="nav-icons">
+    <button class="icon-btn" type="button">💬</button>
+    <button class="icon-btn" type="button" style="position:relative">🛒<span class="cart-badge">1</span></button>
+    <button class="icon-btn" type="button">🔔</button>
+    <button class="icon-btn" type="button">🌐</button>
+    <button class="icon-btn" type="button">🌙</button>
+  </div>
+  <div class="nav-user" id="nav-user-menu" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false">
+    <div class="avatar-nav" id="nav-avatar">L</div>
+    <span id="nav-uname">...</span> ▾
+    <div class="nav-user-dropdown" id="nav-user-dropdown">
+      <button type="button" id="logout-btn">Logout</button>
+    </div>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-inner">
+    <div class="page-header">
+      <h1>Courses</h1>
+      <a class="btn-create" href="/teach.html">Create New Course</a>
+    </div>
+    <div class="explainer">
+      <h2>Browse created courses</h2>
+      <p>All published courses appear here. Expand a course to see its sessions.</p>
+    </div>
+    <div id="courses" class="courses-grid"></div>
+    <div id="empty" class="empty" style="display:none;">No courses yet. Create one from a waiting room or the Host flow.</div>
+  </div>
+</div>
+
+<script src="/courses.js"></script>
+</body>
+</html>

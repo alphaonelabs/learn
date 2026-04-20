@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Waiting Room Details — Alpha One Labs</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --teal: #0f9d95;
+    --bg: #f8fafc;
+    --line: #e5e7eb;
+    --text: #111827;
+    --muted: #6b7280;
+    --primary: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  nav {
+    height: 64px; background: var(--teal); color: #fff; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px;
+  }
+  .brand { font-weight: 700; text-decoration: none; color: #fff; }
+  .nav-user { font-size: 14px; font-weight: 600; }
+  .wrap { max-width: 980px; margin: 28px auto; padding: 0 16px; }
+  .back-link { color: #2563eb; text-decoration: none; font-weight: 600; font-size: 14px; }
+  .card {
+    margin-top: 14px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 22px;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+  }
+  .top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+  .title { font-size: 34px; font-weight: 700; margin: 0; line-height: 1.1; }
+  .desc { margin-top: 8px; color: #374151; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; color: #065f46; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 999px; padding: 6px 10px; font-size: 13px; font-weight: 600; }
+  .dot { width: 7px; height: 7px; border-radius: 999px; background: #22c55e; display: inline-block; }
+  .grid { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .pane { background: #f9fafb; border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .pane h3 { margin: 0 0 12px 0; font-size: 20px; }
+  .meta-label { font-size: 12px; color: var(--muted); margin-top: 10px; font-weight: 600; }
+  .meta-value { margin-top: 4px; }
+  .tag { display: inline-flex; border: 1px solid #ddd6fe; background: #f5f3ff; color: #6d28d9; border-radius: 999px; font-size: 12px; padding: 4px 9px; }
+  .list-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .count { min-width: 24px; height: 24px; border-radius: 999px; background: #e5e7eb; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
+  .participant { display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 8px 10px; margin-bottom: 8px; }
+  .p-name { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+  .avatar { width: 24px; height: 24px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; background: #dbeafe; color: #1e3a8a; font-weight: 700; text-transform: uppercase; }
+  .creator-pill { border: 1px solid #e9d5ff; background: #faf5ff; color: #7e22ce; border-radius: 999px; font-size: 11px; padding: 3px 8px; font-weight: 600; }
+  .foot { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 16px; display: flex; gap: 10px; }
+  .btn { border: 0; border-radius: 8px; font-weight: 600; font-size: 14px; padding: 11px 16px; cursor: pointer; }
+  .btn-join { background: var(--primary); color: #fff; }
+  .btn-leave { background: #fff; color: #b45309; border: 1px solid #f59e0b; }
+  .btn-delete { background: #fff; color: #dc2626; border: 1px solid #ef4444; }
+  .error { color: #b91c1c; margin-top: 12px; font-size: 14px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } .title { font-size: 30px; } }
+</style>
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">Alpha One Labs</a>
+  <div class="nav-user" id="nav-user">...</div>
+</nav>
+<div class="wrap">
+  <a class="back-link" href="/waitingroom.html">← Back to Waiting Rooms</a>
+  <div class="card">
+    <div class="top">
+      <div>
+        <h1 class="title" id="room-title">Loading...</h1>
+        <div class="desc" id="room-desc"></div>
+        <div class="desc" id="room-linked-course"></div>
+      </div>
+      <span class="badge" id="room-status"><span class="dot"></span> Open</span>
+    </div>
+
+    <div class="grid">
+      <div class="pane">
+        <h3>Request Details</h3>
+        <div class="meta-label">Subject</div>
+        <div class="meta-value" id="room-subject">-</div>
+        <div class="meta-label">Topics</div>
+        <div class="meta-value" id="room-tags">-</div>
+        <div class="meta-label">Created By</div>
+        <div class="meta-value"><span class="tag" id="room-creator">-</span></div>
+      </div>
+      <div class="pane">
+        <div class="list-head">
+          <h3 style="margin:0">Participants</h3>
+          <span class="count" id="participant-count">0</span>
+        </div>
+        <div id="participant-list"></div>
+      </div>
+    </div>
+
+    <div class="foot" id="actions"></div>
+    <div class="error" id="error"></div>
+  </div>
+</div>
+
+<script src="/waitingroom-detail.js"></script>
+</body>
+</html>

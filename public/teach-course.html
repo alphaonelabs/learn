@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create Course from Waiting Room - Alpha One Labs</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root { --line:#e5e7eb; --muted:#6b7280; --primary:#6366f1; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: Inter, system-ui, sans-serif; background:#f7f7fb; color:#111827; }
+    /* NAVBAR (same as waitingroom.html + waitingroom.css) */
+    nav{background:#0d9488;height:52px;display:flex;align-items:center;padding:0 20px;gap:16px;position:sticky;top:0;z-index:200;}
+    .nav-logo{display:flex;align-items:center;gap:10px;color:#fff;font-weight:700;font-size:15px;text-decoration:none;flex-shrink:0;}
+    .nav-logo-box{width:34px;height:34px;display:block;object-fit:contain;flex-shrink:0;}
+    .nav-links{display:flex;gap:4px;margin-left:8px;}
+    .nav-links a{color:rgba(255,255,255,.88);font-size:13px;font-weight:500;text-decoration:none;padding:5px 8px;border-radius:4px;white-space:nowrap;}
+    .nav-links a:hover{color:#fff;background:rgba(255,255,255,.1);}
+    .nav-search{flex:1;max-width:280px;margin-left:auto;display:flex;align-items:center;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.15);border-radius:6px;padding:0 10px;gap:6px;}
+    .nav-search input{background:none;border:none;outline:none;color:#fff;font-size:13px;font-family:'Inter',sans-serif;width:100%;}
+    .nav-search input::placeholder{color:rgba(255,255,255,.55);}
+    .nav-icons{display:flex;align-items:center;gap:4px;}
+    .icon-btn{background:none;border:none;cursor:pointer;color:rgba(255,255,255,.8);width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative;font-size:16px;}
+    .icon-btn:hover{background:rgba(255,255,255,.1);}
+    .cart-badge{position:absolute;top:2px;right:2px;background:#ef4444;color:#fff;border-radius:99px;font-size:9px;font-weight:700;width:14px;height:14px;display:flex;align-items:center;justify-content:center;}
+    .nav-user{display:flex;align-items:center;gap:6px;color:#fff;font-size:13px;font-weight:500;cursor:pointer;padding:4px 8px;border-radius:6px;position:relative;}
+    .nav-user:hover{background:rgba(255,255,255,.1);}
+    .nav-user-dropdown{position:absolute;right:0;top:calc(100% + 8px);background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px;display:none;min-width:120px;z-index:250;}
+    .nav-user-dropdown button{width:100%;border:none;background:transparent;text-align:left;padding:8px 10px;border-radius:6px;font-size:13px;color:#b91c1c;cursor:pointer;font-family:'Inter',sans-serif;}
+    .nav-user-dropdown button:hover{background:#fef2f2;}
+    .nav-user.open .nav-user-dropdown{display:block;}
+    .avatar-nav{width:28px;height:28px;border-radius:50%;background:#f97316;color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;text-transform:uppercase;}
+    .wrap { max-width: 660px; margin: 18px auto; padding: 0 12px; }
+    .title-block { margin-bottom: 12px; }
+    .main-title { margin:0; font-size:33px; line-height:1.08; font-weight:800; letter-spacing:-0.5px; display:flex; align-items:center; gap:10px; }
+    .main-title .icon { font-size:34px; }
+    .subtitle { margin:8px 0 0; color:#4b5563; font-size:15px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:12px; box-shadow:0 4px 18px rgba(15,23,42,.04); padding:22px 22px 16px; }
+    .card-title { margin:0 0 18px; font-size:31px; line-height:1.08; font-weight:600; letter-spacing:-0.5px; }
+    .group { margin-bottom: 12px; }
+    label { display:block; font-weight:700; font-size:14px; margin-bottom:7px; }
+    input, textarea { width:100%; border:1px solid var(--line); border-radius:8px; padding:10px 11px; font-size:14px; font-family:inherit; background:#fff; }
+    input::placeholder, textarea::placeholder { color:#9ca3af; }
+    .file-input { border:0; padding:0; border-radius:0; }
+    .editor-shell { border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+    .toolbar { display:flex; align-items:center; gap:14px; padding:10px; border-bottom:1px solid var(--line); color:#111827; font-size:18px; }
+    .toolbar button { border:0; background:transparent; padding:0; margin:0; color:#111827; cursor:pointer; font-size:20px; line-height:1; }
+    textarea { border:0; border-radius:0; min-height:350px; resize:vertical; }
+    .hint { font-size:12px; color:var(--muted); margin-top:6px; }
+    .time-row { display:flex; align-items:center; gap:8px; }
+    .time-input { max-width:210px; }
+    .linkish { color:#6366f1; font-weight:600; font-size:16px; text-decoration:none; display:inline-block; margin:6px 0 2px; }
+    .check { display:flex; flex-direction:column; gap:6px; font-size:14px; color:#374151; margin:10px 0; }
+    .check-row { display:flex; align-items:center; gap:10px; cursor:pointer; }
+    .check-row span { line-height:1.4; }
+    .check input { width:16px; height:16px; margin:0; }
+    .btn { width:100%; border:0; background:var(--primary); color:#fff; padding:13px 12px; border-radius:8px; font-weight:800; font-size:24px; letter-spacing:-0.2px; cursor:pointer; }
+    .btn:disabled { opacity:.7; cursor:not-allowed; }
+    .msg { margin-top:10px; font-size:13px; min-height:18px; }
+    .ok { color:#166534; }
+    .err { color:#b91c1c; }
+    #subject, #tags, #end-time { display:none; }
+    @media (max-width: 700px) {
+      .main-title, .card-title { font-size:30px; }
+      .btn { font-size:22px; }
+    }
+    @media(max-width:800px){.nav-links{display:none;}}
+  </style>
+</head>
+<body>
+  <!-- NAV (same as waitingroom.html) -->
+  <nav>
+    <a href="#" class="nav-logo">
+      <img class="nav-logo-box" alt="Alpha One Labs logo" src="/images/logo.png"/>
+      Alpha One Labs
+    </a>
+    <div class="nav-links">
+      <a href="#">LEARN ▾</a>
+      <a href="/courses.html">COURSES</a>
+      <a href="#">COMMUNITY ▾</a>
+      <a href="#">RESOURCES ▾</a>
+      <a href="#">ABOUT ▾</a>
+    </div>
+    <div class="nav-search">
+      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" placeholder="What do you want to learn?"/>
+    </div>
+    <div class="nav-icons">
+      <button class="icon-btn" type="button">💬</button>
+      <button class="icon-btn" type="button" style="position:relative">🛒<span class="cart-badge">1</span></button>
+      <button class="icon-btn" type="button">🔔</button>
+      <button class="icon-btn" type="button">🌐</button>
+      <button class="icon-btn" type="button">🌙</button>
+    </div>
+    <div class="nav-user" id="nav-user-menu" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false">
+      <div class="avatar-nav" id="nav-avatar">L</div>
+      <span id="nav-uname">...</span> ▾
+      <div class="nav-user-dropdown" id="nav-user-dropdown">
+        <button type="button" id="logout-btn">Logout</button>
+      </div>
+    </div>
+  </nav>
+  <div class="wrap">
+    <div class="title-block">
+      <h1 class="main-title"><span class="icon">🎓</span> Start Teaching with Alpha One Labs</h1>
+      <p class="subtitle">Ready to share your knowledge? Fill out the form below to begin creating your course!</p>
+    </div>
+    <div class="card">
+      <h2 class="card-title">Create Your Course</h2>
+      <form id="course-form">
+        <div class="group">
+          <label for="title">Course Title</label>
+          <input id="title" type="text" placeholder="Enter your course title" required />
+        </div>
+        <div class="group">
+          <label for="image">Course image</label>
+          <input id="image" class="file-input" type="file" accept="image/*" />
+        </div>
+        <div class="group">
+          <label for="description">Course Description</label>
+          <div class="editor-shell">
+            <div class="toolbar">
+              <button type="button" data-action="bold" title="Bold"><strong>B</strong></button>
+              <button type="button" data-action="italic" title="Italic"><em>I</em></button>
+              <button type="button" data-action="heading" title="Heading">H</button>
+              <button type="button" data-action="quote" title="Quote">❝</button>
+              <button type="button" data-action="ul" title="Bulleted List">≣</button>
+              <button type="button" data-action="ol" title="Numbered List">☰</button>
+              <button type="button" data-action="link" title="Insert Link">🔗</button>
+              <button type="button" data-action="separator" title="Separator">◉</button>
+              <button type="button" data-action="help" title="Formatting Help">?</button>
+            </div>
+            <textarea id="description" placeholder="Describe your course..."></textarea>
+          </div>
+          <div class="hint">Provide a detailed description of your course</div>
+        </div>
+        <input id="subject" type="text" />
+        <input id="tags" type="text" />
+        <input id="end-time" type="hidden" />
+        <div class="group">
+          <label for="start-time">Preferred Session Time</label>
+          <div class="time-row">
+            <input id="start-time" class="time-input" type="datetime-local" />
+          </div>
+          <span class="linkish" aria-disabled="true">+ Add Another Session Time</span>
+          <div class="hint">Select preferred time for your course sessions.</div>
+        </div>
+        <div class="check">
+          <div style="font-weight:700;color:#111827">Flexible Timing</div>
+          <label class="check-row">
+            <input id="free-trial" type="checkbox" />
+            <span>Check if you're open to scheduling sessions at various times.</span>
+          </label>
+        </div>
+        <button class="btn" type="submit" id="submit-btn">Create Course Draft</button>
+        <div class="msg ok" id="ok-msg"></div>
+        <div class="msg err" id="err-msg"></div>
+      </form>
+    </div>
+  </div>
+  <script src="/teach-course.js"></script>
+</body>
+</html>
