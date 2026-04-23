@@ -5,7 +5,7 @@
 # ========================================
 # Encryption
 # ========================================
-# Used to encrypt user PII (Personal Identifiable Information) and activity data
+# Used to encrypt user PII (Personally Identifiable Information) and activity data
 # before storing it in the database. Ensure this is a strong randomly generated string.
 ENCRYPTION_KEY=your-dev-encryption-key-here
 
