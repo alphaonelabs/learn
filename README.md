@@ -97,7 +97,7 @@ wrangler secret put JWT_SECRET
 
 ### Running the Application
 
-The application consists of a backend worker and frontend HTML files. Run them concurrently in separate instructions.
+The application consists of a backend worker and frontend HTML files. Run them concurrently in separate terminal sessions.
 
 #### Run Backend
 
