@@ -38,7 +38,7 @@ cd learn
 git remote add upstream https://github.com/alphaonelabs/learn.git
 ```
 
-### Login to Cloudflare (One time)
+### Login to Cloudflare (One-time)
 
 Authenticate the Wrangler CLI with your Cloudflare account. This will open a browser window to complete the login process safely.
 
