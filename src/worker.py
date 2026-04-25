@@ -1095,6 +1095,27 @@ async def api_join(req, env):
         await capture_exception(e, req, env, "api_join.insert_enrollment")
         return err("Failed to join activity — please try again", 500)
 
+    try:
+        act_detail = await env.DB.prepare(
+            "SELECT a.host_id, a.title, u.name AS joiner_name"
+            " FROM activities a"
+            " JOIN users u ON u.id = ?"
+            " WHERE a.id = ?"
+        ).bind(user["id"], act_id).first()
+        if act_detail and act_detail.host_id != user["id"]:
+            joiner = decrypt(act_detail.joiner_name or "", env.ENCRYPTION_KEY)
+            activity_title = act_detail.title or "your activity"
+            await _create_notification(
+                env,
+                user_id=act_detail.host_id,
+                type_="new_enrollment",
+                title="New participant joined",
+                message=f"{joiner} joined {activity_title}",
+                related_id=act_id,
+            )
+    except Exception as exc:
+        await capture_exception(exc, env=env, where="api_join.notify_host")
+
     return ok(None, "Joined activity successfully")
 
 
@@ -1204,6 +1225,24 @@ async def api_create_session(req, env):
     except Exception as e:
         await capture_exception(e, req, env, "api_create_session.insert_session")
         return err("Failed to create session — please try again", 500)
+
+    try:
+        enrolled = await env.DB.prepare(
+            "SELECT user_id FROM enrollments"
+            " WHERE activity_id = ? AND status != 'inactive'"
+        ).bind(act_id).all()
+        for row in enrolled.results or []:
+            if row.user_id != user["id"]:
+                await _create_notification(
+                    env,
+                    user_id=row.user_id,
+                    type_="new_session",
+                    title="New session scheduled",
+                    message=f"A new session '{title}' has been scheduled.",
+                    related_id=sid,
+                )
+    except Exception as exc:
+        await capture_exception(exc, env=env, where="api_create_session.notify_enrolled")
 
     return ok({"id": sid}, "Session created")
 
