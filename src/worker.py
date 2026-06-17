@@ -7714,6 +7714,9 @@ async def _dispatch(request, env):
         # Matches /api/r2/<anything> (the key may contain slashes)
         if path.startswith("/api/r2/") and method == "GET":
             r2_key = path[len("/api/r2/"):]
+            # Only allow course-material keys under the expected prefix
+            if not r2_key.startswith("materials/"):
+                return err("Invalid R2 key", 400)
             # Accept token from Authorization header OR ?token= query param
             # (browser <a> navigation can't set headers, so we allow query param)
             auth_header = request.headers.get("Authorization") or ""

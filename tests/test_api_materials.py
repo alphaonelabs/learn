@@ -621,6 +621,98 @@ class TestDownloadMaterial:
 
 
 # ---------------------------------------------------------------------------
+# update_material
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateMaterial:
+    """PATCH /api/activities/:activity_id/materials/:mid"""
+
+    def _req(self, activity_id=ACTIVITY_ID, mid=MATERIAL_ID, uid=USER_ID, body=None):
+        return MockRequest(
+            method="PATCH",
+            url=f"http://localhost/api/activities/{activity_id}/materials/{mid}",
+            headers={"Authorization": f"Bearer {_token(uid)}", "Content-Type": "application/json"},
+            body=json.dumps(body) if body is not None else json.dumps({}),
+        )
+
+    async def test_no_auth_returns_401(self):
+        req = MockRequest(
+            method="PATCH",
+            url=f"http://localhost/api/activities/{ACTIVITY_ID}/materials/{MATERIAL_ID}",
+            headers={"Content-Type": "application/json"},
+            body=json.dumps({"title": "New", "description": "Updated"}),
+        )
+        env = _make_env_with_r2(db=MockDB([]))
+        resp = await materials.update_material(ACTIVITY_ID, MATERIAL_ID, req, env)
+        assert resp.status == 401
+
+    async def test_material_not_found_returns_404(self):
+        env = _make_env_with_r2(db=MockDB([
+            make_stmt(first=None),  # material lookup
+        ]))
+        resp = await materials.update_material(ACTIVITY_ID, MATERIAL_ID, self._req(body={"title": "New"}), env)
+        assert resp.status == 404
+
+    async def test_non_owner_non_host_returns_403(self):
+        mat_row = _make_material_row(uploaded_by=OTHER_USER_ID)
+        act_row = MockRow(host_id=OTHER_USER_ID)
+        env = _make_env_with_r2(db=MockDB([
+            make_stmt(first=mat_row),   # material lookup
+            make_stmt(first=act_row),   # host lookup
+        ]))
+        resp = await materials.update_material(ACTIVITY_ID, MATERIAL_ID, self._req(uid=USER_ID, body={"title": "New"}), env)
+        assert resp.status == 403
+
+    async def test_missing_title_returns_400(self):
+        mat_row = _make_material_row(uploaded_by=USER_ID)
+        env = _make_env_with_r2(db=MockDB([
+            make_stmt(first=mat_row),
+        ]))
+        # Empty title should be rejected
+        resp = await materials.update_material(ACTIVITY_ID, MATERIAL_ID, self._req(body={"title": " "}), env)
+        assert resp.status == 400
+        assert "title" in _parse(resp)["error"].lower()
+
+    async def test_uploader_can_update(self):
+        mat_row = _make_material_row(uploaded_by=USER_ID)
+        update_stmt = make_stmt()
+        env = _make_env_with_r2(db=MockDB([
+            make_stmt(first=mat_row),  # material lookup
+            update_stmt,               # UPDATE
+        ]))
+        resp = await materials.update_material(ACTIVITY_ID, MATERIAL_ID, self._req(body={"title": "New title", "description": "Updated"}), env)
+        assert resp.status == 200
+        data = _parse(resp)
+        assert data["success"] is True
+        assert data["data"]["id"] == MATERIAL_ID
+        assert data["data"]["title"] == "New title"
+
+    async def test_host_can_update_others_material(self):
+        mat_row = _make_material_row(uploaded_by=OTHER_USER_ID)
+        host_act_row = MockRow(host_id=USER_ID)
+        update_stmt = make_stmt()
+        env = _make_env_with_r2(db=MockDB([
+            make_stmt(first=mat_row),      # material lookup
+            make_stmt(first=host_act_row), # host lookup
+            update_stmt,                   # UPDATE
+        ]))
+        resp = await materials.update_material(ACTIVITY_ID, MATERIAL_ID, self._req(body={"title": "New"}), env)
+        assert resp.status == 200
+
+    async def test_db_error_returns_500(self):
+        mat_row = _make_material_row(uploaded_by=USER_ID)
+        bad_stmt = make_stmt()
+        bad_stmt.bind.return_value.run.side_effect = Exception("DB down")
+        env = _make_env_with_r2(db=MockDB([
+            make_stmt(first=mat_row),
+            bad_stmt,
+        ]))
+        resp = await materials.update_material(ACTIVITY_ID, MATERIAL_ID, self._req(body={"title": "New"}), env)
+        assert resp.status == 500
+
+
+# ---------------------------------------------------------------------------
 # Helper unit tests
 # ---------------------------------------------------------------------------
 

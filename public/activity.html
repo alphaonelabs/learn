@@ -217,8 +217,8 @@
         <i class="fas fa-users absolute bottom-10 right-10 text-6xl"></i>
       </div>
       <div class="relative max-w-[90rem] mx-auto px-4 md:px-6">
-        <nav class="text-teal-100 text-sm mb-6 flex items-center gap-2">
-          <button onclick="backToBrowser()" class="hover:text-white transition flex items-center gap-1">
+          <nav class="text-teal-100 text-sm mb-6 flex items-center gap-2">
+          <button type="button" onclick="backToBrowser()" class="hover:text-white transition flex items-center gap-1">
             <i class="fas fa-arrow-left"></i>Activities
           </button>
           <span>/</span>
@@ -272,18 +272,18 @@
     <div class="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-20 shadow-sm">
       <div class="max-w-[90rem] mx-auto px-4 md:px-6">
         <div class="flex gap-0 overflow-x-auto" id="tab-bar" role="tablist">
-          <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')" role="tab">
+          <button type="button" class="tab-btn active" data-tab="overview" onclick="switchTab('overview')" role="tab">
             <i class="fas fa-home mr-2"></i>Overview
           </button>
-          <button class="tab-btn" data-tab="sessions" onclick="switchTab('sessions')" role="tab">
+          <button type="button" class="tab-btn" data-tab="sessions" onclick="switchTab('sessions')" role="tab">
             <i class="fas fa-calendar mr-2"></i>Sessions
             <span id="tab-sessions-count" class="ml-1.5 text-xs bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300 px-1.5 py-0.5 rounded-full hidden"></span>
           </button>
-          <button class="tab-btn" data-tab="materials" onclick="switchTab('materials')" role="tab">
+          <button type="button" class="tab-btn" data-tab="materials" onclick="switchTab('materials')" role="tab">
             <i class="fas fa-folder-open mr-2"></i>Materials
             <span id="tab-materials-count" class="ml-1.5 text-xs bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded-full hidden"></span>
           </button>
-          <button class="tab-btn" data-tab="host" onclick="switchTab('host')" role="tab">
+          <button type="button" class="tab-btn" data-tab="host" onclick="switchTab('host')" role="tab">
             <i class="fas fa-user-tie mr-2"></i>About Host
           </button>
         </div>
@@ -428,7 +428,7 @@
               <p class="text-gray-600 dark:text-gray-300 text-sm mb-6 max-w-sm mx-auto">
                 Session locations and descriptions are encrypted and only revealed to participants.
               </p>
-              <button id="btn-join" onclick="joinActivity()"
+               <button type="button" id="btn-join" onclick="joinActivity()"
                 class="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white font-bold px-8 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all">
                 <i class="fas fa-user-plus mr-2"></i>Join Activity - Free
               </button>
@@ -522,7 +522,7 @@
               Course Materials
               <span id="mat-count-label" class="text-sm font-normal text-gray-500 dark:text-gray-400"></span>
             </h2>
-            <button onclick="loadMaterials()" title="Refresh"
+            <button type="button" onclick="loadMaterials()" title="Refresh"
               class="text-sm text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 flex items-center gap-1 transition-colors">
               <i class="fas fa-sync-alt"></i>
             </button>

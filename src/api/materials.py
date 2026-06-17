@@ -98,7 +98,7 @@ async def _parse_multipart(req):
                 # It's a File/Blob – read raw bytes.
                 try:
                     arr_buf = await value.arrayBuffer()
-                    import js  # noqa: PLC0415 – CF runtime only
+                    import js  
                     raw = bytes(js.Uint8Array.new(arr_buf))
                 except Exception:
                     raw = b""
@@ -115,7 +115,7 @@ async def _parse_multipart(req):
             if filename is not None:
                 try:
                     arr_buf = await val.arrayBuffer()
-                    import js  # noqa: PLC0415
+                    import js  
                     raw = bytes(js.Uint8Array.new(arr_buf))
                 except Exception:
                     raw = b""
@@ -142,7 +142,15 @@ async def _upload_to_r2(env, key: str, data: bytes, content_type: str = "applica
         import js                       # noqa: PLC0415
         http_meta = {"contentType": content_type}
         if original_filename:
-            http_meta["contentDisposition"] = f'attachment; filename="{original_filename}"'
+            # Sanitize filename for Content-Disposition to avoid header injection.
+            safe_fn = (
+                str(original_filename)
+                .replace("\\", "_")
+                .replace('"', "_")
+                .replace("\r", "")
+                .replace("\n", "")
+            )
+            http_meta["contentDisposition"] = f'attachment; filename="{safe_fn}"'
         options = to_js(
             {"httpMetadata": http_meta},
             dict_converter=js.Object.fromEntries,
@@ -274,10 +282,20 @@ async def upload_material(activity_id: str, req, env):
     if not file_field:
         return w.err("file is required", 400)
 
-    # Support both dict (multipart) and raw bytes (test injection)
+    # Support both dict (multipart/JSON) and raw bytes (test injection)
     if isinstance(file_field, dict):
         filename = file_field.get("filename") or "upload"
-        file_bytes = file_field.get("bytes") or b""
+        raw_bytes = file_field.get("bytes") or b""
+        # JSON fallback may provide a list of ints; normalise to bytes.
+        if isinstance(raw_bytes, list):
+            try:
+                file_bytes = bytes(raw_bytes)
+            except Exception:
+                return w.err("Invalid file bytes", 400)
+        elif isinstance(raw_bytes, (bytes, bytearray)):
+            file_bytes = bytes(raw_bytes)
+        else:
+            return w.err("Invalid file bytes", 400)
         content_type = file_field.get("content_type") or "application/octet-stream"
     elif isinstance(file_field, (bytes, bytearray)):
         filename = fields.get("filename") or "upload"
@@ -449,7 +467,8 @@ async def download_material(activity_id: str, mid: str, req, env):
     """GET /api/activities/:activity_id/materials/:mid/download
 
     Returns a time-limited signed URL for the material's R2 object.
-    The raw R2 key is never exposed to the client.
+    Prefer presigned R2 URLs; if presigning isn't available, falls back to
+    the authenticated ``/api/r2/{key}`` proxy implemented in the worker.
     Requires authentication.
     """
     w = _worker()

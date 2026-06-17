@@ -39,6 +39,16 @@ function _currentUser() {
   return { _opaque: true };
 }
 
+// ── HTML escape helper (for XSS safety) ─────────────────────
+function escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ── Toast ──────────────────────────────────────────────────
 function showToast(msg, type = 'success') {
   const el   = document.getElementById('act-toast');
@@ -138,22 +148,27 @@ function renderActivityCard(act) {
   };
   const typeC = typeColours[act.type] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
   const fmtC  = fmtColours[act.format] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
+  const safeId    = escHtml(act.id);
+  const safeTitle = escHtml(act.title || '');
+  const safeDesc  = escHtml(act.description || 'No description provided.');
+  const safeType  = escHtml(act.type || 'activity');
+  const safeFmt   = escHtml((act.format || 'online').replace('_', ' '));
   const tags  = (act.tags || []).slice(0, 3).map(t =>
-    `<span class="badge bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 text-xs">${t}</span>`
+    `<span class="badge bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 text-xs">${escHtml(t)}</span>`
   ).join('');
 
   return `
     <article class="card-hover rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-md overflow-hidden cursor-pointer"
-      onclick="openActivity('${act.id}')">
+      onclick="openActivity('${safeId}')">
       <div class="p-6">
         <div class="flex items-start justify-between gap-3 mb-3">
-          <h3 class="font-bold text-gray-900 dark:text-gray-100 text-lg leading-snug line-clamp-2">${act.title}</h3>
-          <span class="badge ${typeC} shrink-0">${act.type || 'activity'}</span>
+          <h3 class="font-bold text-gray-900 dark:text-gray-100 text-lg leading-snug line-clamp-2">${safeTitle}</h3>
+          <span class="badge ${typeC} shrink-0">${safeType}</span>
         </div>
-        <p class="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-4">${act.description || 'No description provided.'}</p>
+        <p class="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-4">${safeDesc}</p>
         <div class="flex flex-wrap gap-2 mb-4">${tags}</div>
         <div class="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500">
-          <span class="badge ${fmtC}">${(act.format || 'online').replace('_', ' ')}</span>
+          <span class="badge ${fmtC}">${safeFmt}</span>
           <span><i class="fas fa-users mr-1"></i>${act.participant_count ?? act.member_count ?? 0} enrolled</span>
         </div>
       </div>
@@ -180,17 +195,18 @@ function buildTagCloud(activities) {
   const cloud = document.getElementById('tag-cloud');
   if (!cloud) return;
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 20);
-  cloud.innerHTML = sorted.map(([tag]) =>
-    `<button class="tag-pill badge bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 hover:bg-teal-100 dark:hover:bg-teal-900/40 text-xs"
-      onclick="toggleTag('${tag}')">${tag}</button>`
-  ).join('');
+  cloud.innerHTML = sorted.map(([tag]) => {
+    const safeTag = escHtml(tag);
+    return `<button class="tag-pill badge bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 hover:bg-teal-100 dark:hover:bg-teal-900/40 text-xs" data-tag="${safeTag}">${safeTag}</button>`;
+  }).join('');
 }
 
 function toggleTag(tag) {
   if (_activeTags.has(tag)) _activeTags.delete(tag);
   else _activeTags.add(tag);
   document.querySelectorAll('.tag-pill').forEach(b => {
-    b.classList.toggle('active', _activeTags.has(b.textContent.trim()));
+    const t = b.dataset.tag || b.textContent.trim();
+    b.classList.toggle('active', _activeTags.has(t));
   });
   applyFilters();
 }
@@ -243,11 +259,14 @@ function renderSimilarActivities(similar) {
   if (!similar.length) { card && card.classList.add('hidden'); return; }
   card && card.classList.remove('hidden');
   list.innerHTML = similar.map(a => `
+    ${'' /* escape dynamic fields */}
+    ${(() => { const sid = escHtml(a.id); const stitle = escHtml(a.title || ''); const stype = escHtml(a.type || ''); const sfmt = escHtml((a.format || '').replace('_', ' ')); return `
     <li class="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
-      onclick="openActivity('${a.id}')">
-      <p class="text-sm font-medium text-gray-800 dark:text-gray-200 line-clamp-1">${a.title}</p>
-      <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${a.type || ''} · ${(a.format || '').replace('_', ' ')}</p>
-    </li>`).join('');
+      onclick="openActivity('${sid}')">
+      <p class="text-sm font-medium text-gray-800 dark:text-gray-200 line-clamp-1">${stitle}</p>
+      <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${stype} · ${sfmt}</p>
+    </li>`; })()}
+  `).join('');
 }
 
 // ── Open activity detail ───────────────────────────────────
@@ -358,7 +377,7 @@ async function loadActivityDetail(id) {
     }
 
     // ── Sessions tab ──
-    const sessionsEl = document.getElementById('sessions-list-tab');
+  const sessionsEl = document.getElementById('sessions-list-tab');
     const sessEmpty  = document.getElementById('sessions-empty');
     const sessCount  = document.getElementById('tab-sessions-count');
     if (sessCount) {
@@ -371,16 +390,21 @@ async function loadActivityDetail(id) {
         sessionsEl.innerHTML = '';
       } else {
         sessEmpty && sessEmpty.classList.add('hidden');
-        sessionsEl.innerHTML = sessions.map(s => `
+        sessionsEl.innerHTML = sessions.map(s => {
+          const title = escHtml(s.title || 'Session');
+          const desc  = s.description ? `<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${escHtml(s.description)}</p>` : '';
+          const when  = s.start_time ? `<span class="text-xs text-gray-400 shrink-0">${escHtml(formatDate(s.start_time))}</span>` : '';
+          return `
           <li class="rounded-xl p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm">
             <div class="flex items-start justify-between gap-3">
               <div>
-                <p class="font-semibold text-gray-800 dark:text-gray-200">${s.title || 'Session'}</p>
-                ${s.description ? `<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${s.description}</p>` : ''}
+                <p class="font-semibold text-gray-800 dark:text-gray-200">${title}</p>
+                ${desc}
               </div>
-              ${s.start_time ? `<span class="text-xs text-gray-400 shrink-0">${formatDate(s.start_time)}</span>` : ''}
+              ${when}
             </div>
-          </li>`).join('');
+          </li>`;
+        }).join('');
       }
     }
 
@@ -491,13 +515,17 @@ function renderMaterialItem(m) {
   _matCache[m.id] = m;
 
   const { icon, colour } = getFileIcon(m.title);
+  const safeId    = escHtml(m.id);
+  const safeTitle = escHtml(m.title || '');
+  const safeDesc  = m.description ? escHtml(m.description) : '';
+  const safeDate  = escHtml(formatDate(m.created_at));
   const hostControls = _isHost ? `
     <div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-      <button data-action="edit" data-mid="${m.id}"
+      <button data-action="edit" data-mid="${safeId}"
         class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors">
         <i class="fas fa-pencil-alt"></i> Edit
       </button>
-      <button data-action="delete" data-mid="${m.id}"
+      <button data-action="delete" data-mid="${safeId}"
         class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 transition-colors">
         <i class="fas fa-trash-alt"></i> Delete
       </button>
@@ -510,14 +538,14 @@ function renderMaterialItem(m) {
           <i class="fas ${icon} text-2xl ${colour}"></i>
         </div>
         <div class="flex-1 min-w-0">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <p class="font-semibold text-gray-800 dark:text-gray-200 truncate">${m.title}</p>
-              ${m.description ? `<p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">${m.description}</p>` : ''}
-              <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">${formatDate(m.created_at)}</p>
-            </div>
-            <button data-action="download" data-mid="${m.id}"
-              class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium transition-colors">
+            <div class="flex items-start justify-between gap-3">
+             <div class="min-w-0">
+               <p class="font-semibold text-gray-800 dark:text-gray-200 truncate">${safeTitle}</p>
+               ${m.description ? `<p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">${safeDesc}</p>` : ''}
+               <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">${safeDate}</p>
+             </div>
+             <button data-action="download" data-mid="${safeId}"
+               class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium transition-colors">
               <i class="fas fa-download"></i>
               <span class="hidden sm:inline">Download</span>
             </button>
@@ -549,16 +577,28 @@ async function downloadMaterial(mid) {
     const filename = payload.filename || payload.title || 'download';
 
     if (url.startsWith('/api/r2/')) {
-      url = `${url}?token=${encodeURIComponent(token)}`;
+      // Use authenticated fetch + blob to avoid putting tokens in query params
+      const proxied = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!proxied.ok) throw new Error('Download failed');
+      const blob = await proxied.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href     = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+    } else {
+      const a = document.createElement('a');
+      a.href     = url;
+      a.download = filename;          // sets the saved filename in the browser
+      a.target   = '_blank';
+      a.rel      = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     }
-    const a = document.createElement('a');
-    a.href     = url;
-    a.download = filename;          // sets the saved filename in the browser
-    a.target   = '_blank';
-    a.rel      = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
     showToast('Download started!', 'success');
   } catch (e) {
     showToast(e.message || 'Download failed', 'error');
@@ -778,6 +818,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('filter-type')?.addEventListener('change', applyFilters);
   document.getElementById('filter-format')?.addEventListener('change', applyFilters);
 
+  // Tag cloud: event delegation (avoids unsafe onclick string injection)
+  document.getElementById('tag-cloud')?.addEventListener('click', e => {
+    const btn = e.target.closest('.tag-pill');
+    if (!btn) return;
+    const tag = btn.dataset.tag || btn.textContent.trim();
+    if (tag) toggleTag(tag);
+  });
+
   // Event delegation for material list buttons (download / edit / delete)
   // Using delegation avoids onclick-in-HTML encoding issues with special chars
   document.getElementById('mat-list')?.addEventListener('click', e => {
@@ -809,4 +857,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(window.location.search);
   const actId  = params.get('id');
   if (actId) openActivity(actId);
+
+  // Global Escape key handling for modals
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const confirmModal = document.getElementById('mat-confirm-modal');
+    const editModal    = document.getElementById('mat-edit-modal');
+    if (confirmModal && !confirmModal.classList.contains('hidden')) {
+      closeDeleteModal();
+    }
+    if (editModal && !editModal.classList.contains('hidden')) {
+      closeEditModal();
+    }
+  });
 });
