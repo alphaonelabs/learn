@@ -362,7 +362,16 @@
       }).then(function (body) {
         var url = body.data && body.data.download_url;
         if (!url) { throw new Error('No download URL returned'); }
-        window.open(url, '_blank', 'noopener,noreferrer');
+        if (url.indexOf('/api/r2/') === 0 && authToken) {
+          url += (url.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(authToken);
+        }
+        var a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
       }).catch(function (e) {
         showToast(e.message || 'Download failed', 'error');
       });
