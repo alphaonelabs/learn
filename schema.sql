@@ -171,3 +171,16 @@ CREATE TABLE IF NOT EXISTS message_requests (
 CREATE INDEX IF NOT EXISTS idx_message_requests_to_user ON message_requests(to_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_message_requests_from_user ON message_requests(from_user_id);
 CREATE INDEX IF NOT EXISTS idx_message_requests_activity ON message_requests(activity_id);
+
+-- Chat messages table (virtual classroom chat persistence)
+CREATE TABLE IF NOT EXISTS chat_message (
+    id           TEXT PRIMARY KEY,
+    classroom_id TEXT NOT NULL,
+    user_id      TEXT NOT NULL,
+    display_name TEXT,
+    content      TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_classroom ON chat_message(classroom_id);
+CREATE INDEX IF NOT EXISTS idx_chat_created   ON chat_message(classroom_id, created_at);

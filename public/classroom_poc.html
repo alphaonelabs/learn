@@ -379,6 +379,9 @@
     // State
     let ws = null;
     let presenceWs = null;
+    let chatWs = null;
+    let chatReconnectAttempts = 0;
+    let chatReconnectTimer = null;
     let roomId = '';
     let myParticipantId = '';
     let myDisplayName = '';
@@ -675,6 +678,7 @@
             reconnectAttempts = 0;
             setConnStatus(true);
             connectPresenceWS();
+            connectChatWS();
             showToast(canInteract ? 'Connected to classroom' : 'Viewing classroom', 'success');
         };
 
@@ -698,8 +702,10 @@
         intentionalDisconnect = true;
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         if (presenceReconnectTimer) { clearTimeout(presenceReconnectTimer); presenceReconnectTimer = null; }
+        if (chatReconnectTimer) { clearTimeout(chatReconnectTimer); chatReconnectTimer = null; }
         if (ws) { ws.close(); ws = null; }
         if (presenceWs) { presenceWs.close(); presenceWs = null; }
+        if (chatWs) { chatWs.close(); chatWs = null; }
         setConnStatus(false);
     }
 
@@ -767,6 +773,68 @@
                 if (!presenceWs || presenceWs.readyState === WebSocket.CLOSED) connectPresenceWS();
             }, delay);
         };
+    }
+
+    // Chat WebSocket (ChatDO — /ws/chat/:id)
+    function connectChatWS() {
+        if (chatWs && (chatWs.readyState === WebSocket.OPEN || chatWs.readyState === WebSocket.CONNECTING)) return;
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const token = localStorage.getItem('edu_token') || '';
+        const params = new URLSearchParams();
+        if (token) params.set('token', token);
+        params.set('user_id', myParticipantId);
+        params.set('display_name', myDisplayName);
+        params.set('classroom_id', roomId);
+        const url = `${proto}//${location.host}/ws/chat/${encodeURIComponent(roomId)}?${params.toString()}`;
+        chatWs = new WebSocket(url);
+        chatWs.onopen = () => {
+            chatReconnectAttempts = 0;
+            if (chatReconnectTimer) { clearTimeout(chatReconnectTimer); chatReconnectTimer = null; }
+        };
+        chatWs.onmessage = (ev) => {
+            try {
+                const data = JSON.parse(ev.data);
+                if (data.type === 'chat_history') {
+                    // Always clear the placeholder, even if history is empty
+                    chatMessages.innerHTML = '';
+                    chatFirstMessage = false;
+                    (data.messages || []).forEach((msg) => appendChatMessage(
+                        msg.display_name || msg.user_id,
+                        msg.text,
+                        msg.user_id === myParticipantId
+                    ));
+                } else if (data.type === 'chat_message') {
+                    appendChatMessage(
+                        data.display_name || data.user_id,
+                        data.text,
+                        data.user_id === myParticipantId
+                    );
+                }
+            } catch (err) {
+                console.warn('[chat] dropped malformed ws frame', err, ev.data);
+            }
+        };
+        chatWs.onerror = () => {
+            console.warn('[chat] WebSocket error');
+        };
+        chatWs.onclose = () => {
+            if (intentionalDisconnect) return;
+            if (chatReconnectAttempts >= MAX_RECONNECT) {
+                showToast('Lost connection to chat — please rejoin.', 'warning');
+                return;
+            }
+            const delay = Math.min(BASE_DELAY * Math.pow(2, chatReconnectAttempts), 30000);
+            chatReconnectAttempts++;
+            chatReconnectTimer = setTimeout(() => {
+                if (!chatWs || chatWs.readyState === WebSocket.CLOSED) connectChatWS();
+            }, delay);
+        };
+    }
+
+    function chatSend(obj) {
+        if (chatWs && chatWs.readyState === WebSocket.OPEN) {
+            chatWs.send(JSON.stringify(obj));
+        }
     }
 
     function presenceSend(obj) {
@@ -918,10 +986,6 @@
                     }
                     renderOtherAvatars();
                 }
-                break;
-
-            case 'chat_message':
-                appendChatMessage(data.display_name, data.text, data.participant_id === myParticipantId);
                 break;
 
             case 'seat_updated':
@@ -1164,13 +1228,13 @@
         presenceSend({ type: 'presence', hand_raised: nextHandRaised });
     });
 
-    // Chat
+    // Chat 
     chatForm.addEventListener('submit', (e) => {
         e.preventDefault();
         if (!canInteract) { loginForInteraction(); return; }
         const text = chatInput.value.trim();
         if (!text) return;
-        wsSend({ type: 'chat_message', text, timestamp: new Date().toISOString() });
+        chatSend({ type: 'chat_message', text });
         chatInput.value = '';
     });
 
