@@ -15,7 +15,7 @@ not_found_handling = "404-page"
 [[d1_databases]]
 binding = "DB"
 database_name = "education_db"
-database_id = "1daa17e9-6d9a-448f-b7a1-98e58edd8128"
+database_id = "a0021f2e-a8cc-4e20-8910-3c7290ba47a6"
 migrations_dir = "migrations"
 
 
