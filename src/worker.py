@@ -54,12 +54,13 @@ from js import WebSocketPair, WebSocketRequestResponsePair
 import uuid
 try:
     from chat_do import ChatDO as _ChatDO
-except Exception:
+except ModuleNotFoundError:
     try:
         from src.chat_do import ChatDO as _ChatDO
-    except Exception:
+    except ModuleNotFoundError:
+        # Fallback stub for local tooling environments where chat_do is absent.
         class _ChatDO(DurableObject):
-            passs
+            pass
 
 # Re-export as ChatDO so wrangler binding resolves in production
 ChatDO = _ChatDO

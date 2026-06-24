@@ -780,8 +780,15 @@
         if (chatWs && (chatWs.readyState === WebSocket.OPEN || chatWs.readyState === WebSocket.CONNECTING)) return;
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const params = new URLSearchParams();
-        params.set('user_id', myParticipantId);
-        params.set('display_name', myDisplayName);
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+            // Prefer authenticated token so the server derives identity server-side.
+            params.set('token', token);
+        } else {
+            // Fallback to anonymous identity only when explicitly enabled server-side.
+            params.set('user_id', myParticipantId);
+            params.set('display_name', myDisplayName);
+        }
         const qs = params.toString();
         const url = qs
             ? `${proto}//${location.host}/ws/chat/${encodeURIComponent(roomId)}?${qs}`
