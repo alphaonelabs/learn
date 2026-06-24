@@ -271,7 +271,7 @@
                 <i data-lucide="message-circle" class="w-4 h-4 text-teal-400"></i>
                 <h2 class="text-sm font-semibold text-gray-200">Room Chat</h2>
             </div>
-            <div id="chatMessages" class="flex-1 overflow-y-auto p-3 space-y-2">
+            <div id="chatMessages" role="log" aria-live="polite" aria-relevant="additions" class="flex-1 overflow-y-auto p-3 space-y-2">
                 <div class="text-center text-xs text-gray-600 py-6">No messages yet!</div>
             </div>
             <form id="chatForm" class="p-3 border-t border-gray-800 flex gap-2">
@@ -779,13 +779,13 @@
     function connectChatWS() {
         if (chatWs && (chatWs.readyState === WebSocket.OPEN || chatWs.readyState === WebSocket.CONNECTING)) return;
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const token = localStorage.getItem('edu_token') || '';
         const params = new URLSearchParams();
-        if (token) params.set('token', token);
         params.set('user_id', myParticipantId);
         params.set('display_name', myDisplayName);
-        params.set('classroom_id', roomId);
-        const url = `${proto}//${location.host}/ws/chat/${encodeURIComponent(roomId)}?${params.toString()}`;
+        const qs = params.toString();
+        const url = qs
+            ? `${proto}//${location.host}/ws/chat/${encodeURIComponent(roomId)}?${qs}`
+            : `${proto}//${location.host}/ws/chat/${encodeURIComponent(roomId)}`;
         chatWs = new WebSocket(url);
         chatWs.onopen = () => {
             chatReconnectAttempts = 0;
@@ -803,6 +803,8 @@
                         msg.text,
                         msg.user_id === myParticipantId
                     ));
+                } else if (data.type === 'chat_error') {
+                    showToast(data.message || 'Failed to send chat message', 'error');
                 } else if (data.type === 'chat_message') {
                     appendChatMessage(
                         data.display_name || data.user_id,
@@ -834,7 +836,9 @@
     function chatSend(obj) {
         if (chatWs && chatWs.readyState === WebSocket.OPEN) {
             chatWs.send(JSON.stringify(obj));
+            return true;
         }
+        return false;
     }
 
     function presenceSend(obj) {
@@ -1234,8 +1238,12 @@
         if (!canInteract) { loginForInteraction(); return; }
         const text = chatInput.value.trim();
         if (!text) return;
-        chatSend({ type: 'chat_message', text });
-        chatInput.value = '';
+        const ok = chatSend({ type: 'chat_message', text });
+        if (ok) {
+            chatInput.value = '';
+        } else {
+            showToast('Chat is not connected. Retry in a moment…', 'warning');
+        }
     });
 
     function appendChatMessage(name, text, isSelf) {

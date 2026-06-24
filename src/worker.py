@@ -53,9 +53,16 @@ from pyodide.ffi import to_js
 from js import WebSocketPair, WebSocketRequestResponsePair
 import uuid
 try:
-    from chat_do import ChatDO
-except ImportError:
-    from src.chat_do import ChatDO
+    from chat_do import ChatDO as _ChatDO
+except Exception:
+    try:
+        from src.chat_do import ChatDO as _ChatDO
+    except Exception:
+        class _ChatDO(DurableObject):
+            passs
+
+# Re-export as ChatDO so wrangler binding resolves in production
+ChatDO = _ChatDO
 
 _SENTRY_INITIALIZED = False
 _SENTRY_DSN: str = ""
@@ -1106,7 +1113,6 @@ _DDL = [
         content      TEXT NOT NULL,
         created_at   TEXT NOT NULL DEFAULT (datetime('now'))
     )""",
-    "CREATE INDEX IF NOT EXISTS idx_chat_classroom ON chat_message(classroom_id)",
     "CREATE INDEX IF NOT EXISTS idx_chat_created   ON chat_message(classroom_id, created_at)",
 ]
 

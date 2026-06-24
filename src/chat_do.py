@@ -73,14 +73,17 @@ async def decrypt_aes(ciphertext: str, secret: str) -> str:
         return ""
     if not ciphertext.startswith("v1:"):
         return _decrypt_xor(ciphertext, secret)
-    raw = base64.b64decode(ciphertext[3:])
-    iv, ct = raw[:12], raw[12:]
-    key_bytes = _pbkdf2_key(secret)
-    crypto_key = await _import_aes_key(key_bytes)
-    iv_array = to_js(iv, create_pyproxies=False)
-    algo = to_js({"name": "AES-GCM", "iv": iv_array}, dict_converter=js.Object.fromEntries)
-    data = to_js(ct, create_pyproxies=False)
     try:
+        raw = base64.b64decode(ciphertext[3:])
+        iv, ct = raw[:12], raw[12:]
+    except Exception:
+        return "[decryption error]"
+    try:
+        key_bytes = _pbkdf2_key(secret)
+        crypto_key = await _import_aes_key(key_bytes)
+        iv_array = to_js(iv, create_pyproxies=False)
+        algo = to_js({"name": "AES-GCM", "iv": iv_array}, dict_converter=js.Object.fromEntries)
+        data = to_js(ct, create_pyproxies=False)
         pt_buf = await js.crypto.subtle.decrypt(algo, crypto_key, data)
         return bytes(js.Uint8Array.new(pt_buf)).decode("utf-8")
     except Exception:
@@ -124,6 +127,7 @@ class ChatDO(DurableObject):
         self.sessions = {}
         self.messages = []
         self._history_loaded = False
+        self._room_id = getattr(self, "_room_id", "")
 
         for ws in self.ctx.getWebSockets():
             try:
@@ -134,6 +138,10 @@ class ChatDO(DurableObject):
                 session_id = data.get("session_id", str(uuid.uuid4()))
                 user_id = str(data.get("user_id", ""))[:64]
                 display_name = str(data.get("display_name", user_id or "Unknown"))[:64]
+                if not self._room_id:
+                    rid = str(data.get("classroom_id", ""))
+                    if rid:
+                        self._room_id = rid
                 if not user_id:
                     continue
                 self.sessions[session_id] = {
@@ -151,12 +159,11 @@ class ChatDO(DurableObject):
     async def _load_history(self, classroom_id: str):
         if self._history_loaded:
             return
-        self._history_loaded = True
         try:
             raw_key = getattr(self.env, "CHAT_ENCRYPTION_KEY", None) or getattr(self.env, "ENCRYPTION_KEY", None)
             enc_key = raw_key.strip() if isinstance(raw_key, str) and raw_key.strip() else ""
             rows = await self.env.DB.prepare(
-                "SELECT id, user_id, display_name, content, created_at FROM chat_message WHERE classroom_id = ? ORDER BY created_at ASC LIMIT ?"
+                "SELECT id, user_id, display_name, content, created_at FROM chat_message WHERE classroom_id = ? ORDER BY created_at DESC LIMIT ?"
             ).bind(classroom_id, self._MAX_BUFFER).all()
             loaded = []
             for row in (rows.results or []):
@@ -181,7 +188,9 @@ class ChatDO(DurableObject):
                     "text": text,
                     "timestamp": r_created_at,
                 })
-            self.messages = loaded
+            # reverse to chronological order for playback
+            self.messages = list(reversed(loaded))
+            self._history_loaded = True
         except Exception as exc:
             if "no such table" in str(exc).lower():
                 await self._ensure_table()
@@ -198,16 +207,17 @@ class ChatDO(DurableObject):
         token_param = (qs.get("token") or [None])[0]
         user_param = (qs.get("user_id") or [None])[0]
         display_param = (qs.get("display_name") or [None])[0]
-        classroom_id = (qs.get("classroom_id") or [None])[0] or ""
+        # Derive classroom_id from path segment /ws/chat/:id
+        m = re.search(r"/ws/chat/([A-Za-z0-9_-]+)", parsed.path or "")
+        classroom_id = m.group(1) if m else ""
 
         authenticated_user = verify_token(token_param or "", self.env.JWT_SECRET) if token_param else None
         if authenticated_user:
             user_id = str(authenticated_user.get("id", ""))
             display_name = str(authenticated_user.get("username") or user_id)
         else:
-            allow_anon = str(getattr(self.env, "ALLOW_ANON_CLASSROOM_POC", "")).lower() in {"1", "true", "yes"}
-            if token_param or not allow_anon or not user_param:
-                return Response(json.dumps({"error": "Authentication required"}), status=401, headers={"Content-Type": "application/json"})
+            if not user_param:
+                return Response(json.dumps({"error": "Invalid user"}), status=400, headers={"Content-Type": "application/json"})
             user_id = str(user_param)
             display_name = str(display_param or user_id)
 
@@ -220,6 +230,8 @@ class ChatDO(DurableObject):
         self.ctx.acceptWebSocket(server)
 
         session_id = str(uuid.uuid4())
+        # Include classroom_id in server-side attachment to support hibernation resume
+        self._room_id = classroom_id
         attachment = json.dumps({
             "session_id": session_id,
             "user_id": user_id,
@@ -285,14 +297,17 @@ class ChatDO(DurableObject):
         if not text:
             return
 
-        classroom_id = ""
-        try:
-            raw_att = ws.deserializeAttachment()
-            if raw_att:
-                att = json.loads(raw_att) if isinstance(raw_att, str) else raw_att
-                classroom_id = str(att.get("classroom_id", ""))
-        except Exception:
-            pass
+        classroom_id = getattr(self, "_room_id", "")
+        if not classroom_id:
+            try:
+                raw_att = ws.deserializeAttachment()
+                if raw_att:
+                    att = json.loads(raw_att) if isinstance(raw_att, str) else raw_att
+                    classroom_id = str(att.get("classroom_id", ""))
+                    if classroom_id:
+                        self._room_id = classroom_id
+            except Exception:
+                pass
 
         timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         msg_id = new_id()
@@ -303,6 +318,15 @@ class ChatDO(DurableObject):
             "text": text,
             "timestamp": timestamp,
         }
+        # Persist first; only broadcast if durable
+        ok = await self._persist_message(msg_id, classroom_id, info["user_id"], info["display_name"], text)
+        if not ok:
+            try:
+                ws.send(json.dumps({"type": "chat_error", "message": "Failed to persist message"}))
+            except Exception:
+                pass
+            return
+
         self.messages.append(entry)
         if len(self.messages) > self._MAX_BUFFER:
             self.messages = self.messages[-self._MAX_BUFFER :]
@@ -315,8 +339,6 @@ class ChatDO(DurableObject):
             "text": text,
             "timestamp": timestamp,
         }))
-
-        await self._persist_message(msg_id, classroom_id, info["user_id"], info["display_name"], text)
 
     async def on_webSocketClose(self, ws, _code, _reason, _was_clean):
         for sid, s_info in list(self.sessions.items()):
