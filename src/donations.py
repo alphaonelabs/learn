@@ -4,22 +4,25 @@ Validation, amount handling, and record formatting.
 Email notifications live in api/donations.py (runtime layer).
 """
 import re
-from typing import Optional, Tuple
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from typing import Optional
 
 VALID_DONATION_TYPES = {"one-time", "monthly"}
 MIN_AMOUNT_CENTS = 100        # $1.00
 MAX_AMOUNT_CENTS = 1_000_000  # $10,000.00
 
 
-def dollars_to_cents(amount_dollars: float) -> int:
-    return round(float(amount_dollars) * 100)
+def dollars_to_cents(amount_dollars) -> int:
+    """Convert a dollar amount to cents using exact decimal arithmetic."""
+    d = Decimal(str(amount_dollars))
+    return int((d * 100).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def cents_to_dollars(amount_cents: int) -> float:
-    return round(amount_cents / 100, 2)
+    return float(Decimal(amount_cents) / 100)
 
 
-def validate_donation_payload(body: dict) -> Tuple[Optional[dict], Optional[str]]:
+def validate_donation_payload(body: dict) -> tuple[Optional[dict], Optional[str]]:
     """Validate and normalise a donation payload.
 
     Returns (normalised_payload, error_message). One of the two will be None.
@@ -29,11 +32,14 @@ def validate_donation_payload(body: dict) -> Tuple[Optional[dict], Optional[str]
         return None, "amount is required"
 
     try:
-        amount_dollars = float(str(amount_raw).replace(",", ""))
-    except (ValueError, TypeError):
+        cleaned = str(amount_raw).replace(",", "").strip()
+        amount_d = Decimal(cleaned)
+        if not amount_d.is_finite():
+            raise ValueError("non-finite amount")
+    except (InvalidOperation, ValueError):
         return None, "amount must be a valid number"
 
-    amount_cents = dollars_to_cents(amount_dollars)
+    amount_cents = dollars_to_cents(amount_d)
     if amount_cents < MIN_AMOUNT_CENTS:
         return None, "Minimum donation is $1.00"
     if amount_cents > MAX_AMOUNT_CENTS:

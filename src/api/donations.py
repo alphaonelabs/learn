@@ -17,6 +17,7 @@ import hashlib
 import hmac as _hmac
 import json
 import os
+import time
 from typing import Optional
 from urllib.parse import urlencode
 
@@ -117,18 +118,19 @@ def _stripe_encode(data: dict, prefix: str = "") -> list:
     return pairs
 
 
-async def _stripe(method: str, path: str, data: dict, key: str):
+async def _stripe(method: str, path: str, data: dict, key: str, *, idempotency_key: str = ""):
     """Make a Stripe REST API call. Returns (response_dict, error_str)."""
     url  = f"https://api.stripe.com/v1/{path.lstrip('/')}"
     body = urlencode(_stripe_encode(data)) if data else None
 
-    fetch_opts = {
-        "method":  method.upper(),
-        "headers": {
-            "Authorization": f"Bearer {key}",
-            "Content-Type":  "application/x-www-form-urlencoded",
-        },
+    headers: dict = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type":  "application/x-www-form-urlencoded",
     }
+    if idempotency_key and method.upper() in ("POST", "PUT", "PATCH"):
+        headers["Idempotency-Key"] = idempotency_key
+
+    fetch_opts = {"method": method.upper(), "headers": headers}
     if body and method.upper() != "GET":
         fetch_opts["body"] = body
 
@@ -148,8 +150,11 @@ async def _stripe(method: str, path: str, data: dict, key: str):
 
 # Webhook signature verification
 
+_WEBHOOK_TOLERANCE_SECONDS = 300  # Stripe's recommended 5-minute replay window
+
+
 def _verify_stripe_webhook(raw_body: str, sig_header: str, secret: str) -> bool:
-    """Verify a Stripe-Signature header using HMAC-SHA256."""
+    """Verify a Stripe-Signature header using HMAC-SHA256 with replay protection."""
     try:
         parts: dict = {}
         for chunk in sig_header.split(","):
@@ -159,6 +164,14 @@ def _verify_stripe_webhook(raw_body: str, sig_header: str, secret: str) -> bool:
         timestamp = parts.get("t", [None])[0]
         v1_sigs   = parts.get("v1", [])
         if not timestamp or not v1_sigs:
+            return False
+
+        # Reject replayed signatures older than the tolerance window
+        try:
+            if abs(time.time() - int(timestamp)) > _WEBHOOK_TOLERANCE_SECONDS:
+                print("[webhook] Signature timestamp out of tolerance — possible replay")
+                return False
+        except (ValueError, TypeError):
             return False
 
         signed   = f"{timestamp}.{raw_body}"
@@ -244,31 +257,48 @@ async def _send_thank_you_email(env, info: dict) -> None:
             f"https://api.mailgun.net/v3/{mailgun_domain}/messages", opts
         )
         if resp.ok:
-            print(f"[email] Thank-you sent to {to_email}")
+            print("[email] Thank-you email sent")
         else:
-            text = await resp.text()
-            print(f"[email] Mailgun error {resp.status}: {text}")
+            print(f"[email] Mailgun error {resp.status}")
     except Exception as exc:
         print(f"[email] _send_thank_you_email error: {exc}")
 
 
 # DB helper shared by webhook handlers
 
-async def _mark_donation(env, field: str, value: str, status: str):
-    """Find a donation by a Stripe ID field and update its status."""
-    try:
-        row = await env.DB.prepare(
-            f"SELECT * FROM donations WHERE {field} = ? LIMIT 1"
-        ).bind(value).first()
-        if not row:
-            return None
-        await env.DB.prepare(
-            "UPDATE donations SET status = ? WHERE id = ?"
-        ).bind(status, row.id).run()
-        return row
-    except Exception as exc:
-        print(f"[donations] _mark_donation error: {exc}")
+_ALLOWED_DONATION_FIELDS = frozenset({
+    "stripe_payment_intent_id",
+    "stripe_subscription_id",
+    "stripe_customer_id",
+})
+
+# Status values ordered from "least final" to "most final".
+# An update that would move the status backward is skipped unless
+# allow_downgrade=True (used for explicit cancellation/failure events).
+_STATUS_RANK = {"pending": 0, "completed": 1, "cancelled": 2, "failed": 2}
+
+
+async def _mark_donation(env, field: str, value: str, status: str, *, allow_downgrade: bool = False):
+    """Find a donation by a Stripe ID field and update its status.
+
+    Raises ValueError for unknown field names (SQL-injection guard).
+    Raises on DB errors so callers can propagate a 5xx to Stripe for retry.
+    """
+    if field not in _ALLOWED_DONATION_FIELDS:
+        raise ValueError(f"_mark_donation: unknown field '{field}'")
+    row = await env.DB.prepare(
+        f"SELECT * FROM donations WHERE {field} = ? LIMIT 1"  # noqa: S608 — field is allowlisted above
+    ).bind(value).first()
+    if not row:
         return None
+    current = getattr(row, "status", "pending") or "pending"
+    if not allow_downgrade and _STATUS_RANK.get(current, 0) >= _STATUS_RANK.get(status, 0) and current != status:
+        print(f"[donations] Skipping status regression {current!r} → {status!r} for {field}={value}")
+        return row
+    await env.DB.prepare(
+        "UPDATE donations SET status = ? WHERE id = ?"
+    ).bind(status, row.id).run()
+    return row
 
 
 # Public API handlers
@@ -331,6 +361,8 @@ async def create_donation_intent(request, env):
     user    = _verify_token(request.headers.get("Authorization") or "", env.JWT_SECRET)
     user_id = user["id"] if user else None
 
+    donation_id = _new_id()  # generate first so it can serve as idempotency key
+
     intent, stripe_err = await _stripe("POST", "/payment_intents", {
         "amount":   validated["amount_cents"],
         "currency": "usd",
@@ -343,12 +375,10 @@ async def create_donation_intent(request, env):
             "anonymous":     "true" if validated["anonymous"] else "false",
             "email":         validated["email"],
         },
-    }, stripe_key)
+    }, stripe_key, idempotency_key=f"pi-{donation_id}")
 
     if stripe_err:
         return _err(f"Payment setup failed: {stripe_err}", 502)
-
-    donation_id = _new_id()
     record      = build_donation_record(donation_id, user_id, validated)
 
     try:
@@ -400,11 +430,13 @@ async def create_subscription_intent(request, env):
     user    = _verify_token(request.headers.get("Authorization") or "", env.JWT_SECRET)
     user_id = user["id"] if user else None
 
+    donation_id = _new_id()  # generate first so it anchors all idempotency keys
+
     # 1. Create or retrieve Stripe Customer
     customer, stripe_err = await _stripe("POST", "/customers", {
         "email":    validated["email"],
         "metadata": {"user_id": user_id or ""},
-    }, stripe_key)
+    }, stripe_key, idempotency_key=f"cus-{donation_id}")
     if stripe_err:
         return _err(f"Payment setup failed: {stripe_err}", 502)
 
@@ -414,7 +446,7 @@ async def create_subscription_intent(request, env):
         "unit_amount":  validated["amount_cents"],
         "recurring":    {"interval": "month"},
         "product_data": {"name": "Alpha One Labs Monthly Donation"},
-    }, stripe_key)
+    }, stripe_key, idempotency_key=f"prc-{donation_id}")
     if stripe_err:
         return _err(f"Payment setup failed: {stripe_err}", 502)
 
@@ -433,7 +465,7 @@ async def create_subscription_intent(request, env):
             "anonymous":     "true" if validated["anonymous"] else "false",
             "email":         validated["email"],
         },
-    }, stripe_key)
+    }, stripe_key, idempotency_key=f"sub-{donation_id}")
     if stripe_err:
         return _err(f"Subscription setup failed: {stripe_err}", 502)
 
@@ -444,8 +476,7 @@ async def create_subscription_intent(request, env):
     except (KeyError, TypeError):
         return _err("Failed to retrieve payment details from subscription", 502)
 
-    donation_id = _new_id()
-    record      = build_donation_record(donation_id, user_id, validated)
+    record = build_donation_record(donation_id, user_id, validated)
 
     try:
         await env.DB.prepare(
@@ -494,6 +525,7 @@ async def handle_donation_webhook(request, env):
     obj        = (event.get("data") or {}).get("object") or {}
     print(f"[webhook] {event_type}")
 
+    handler_exc = None
     try:
         if   event_type == "payment_intent.succeeded":
             await _on_payment_succeeded(env, obj)
@@ -510,9 +542,13 @@ async def handle_donation_webhook(request, env):
         elif event_type == "invoice.payment_failed":
             await _on_invoice_failed(env, obj)
     except Exception as exc:
-        print(f"[webhook] Unhandled error in {event_type}: {exc}")
+        print(f"[webhook] Error processing {event_type}: {exc}")
+        handler_exc = exc
 
-    # Always return 200 so Stripe doesn't retry on our logic errors
+    # Return 500 for transient errors (DB failures, etc.) so Stripe retries.
+    # Return 200 for unknown event types — no retry needed.
+    if handler_exc is not None:
+        return _json_resp({"error": "processing_failed"}, 500)
     return _json_resp({"received": True}, 200)
 
 
@@ -534,28 +570,33 @@ async def _on_payment_succeeded(env, intent: dict) -> None:
 
 async def _on_payment_failed(env, intent: dict) -> None:
     intent_id = intent.get("id", "")
-    await _mark_donation(env, "stripe_payment_intent_id", intent_id, "failed")
+    await _mark_donation(env, "stripe_payment_intent_id", intent_id, "failed", allow_downgrade=True)
     print(f"[webhook] PaymentIntent {intent_id} failed")
 
 
 async def _on_subscription_created(env, sub: dict) -> None:
     sub_id = sub.get("id", "")
-    status = "completed" if sub.get("status") == "active" else "pending"
-    await _mark_donation(env, "stripe_subscription_id", sub_id, status)
-    print(f"[webhook] Subscription {sub_id} created → {status}")
+    # Only set to pending if not already completed (payment_intent.succeeded fires first
+    # for the initial payment and owns setting completed).
+    if sub.get("status") != "active":
+        await _mark_donation(env, "stripe_subscription_id", sub_id, "pending")
+    print(f"[webhook] Subscription {sub_id} created → {sub.get('status')}")
 
 
 async def _on_subscription_updated(env, sub: dict) -> None:
     sub_id = sub.get("id", "")
-    status_map = {"active": "completed", "past_due": "pending", "canceled": "cancelled"}
-    status = status_map.get(sub.get("status", ""), "pending")
-    await _mark_donation(env, "stripe_subscription_id", sub_id, status)
-    print(f"[webhook] Subscription {sub_id} updated → {status}")
+    stripe_status = sub.get("status", "")
+    # Only map downgrade states; "active" is not forced here because
+    # payment_intent.succeeded already owns the completed transition.
+    status_map = {"past_due": "pending", "canceled": "cancelled", "unpaid": "pending"}
+    if stripe_status in status_map:
+        await _mark_donation(env, "stripe_subscription_id", sub_id, status_map[stripe_status], allow_downgrade=True)
+    print(f"[webhook] Subscription {sub_id} updated → {stripe_status}")
 
 
 async def _on_subscription_cancelled(env, sub: dict) -> None:
     sub_id = sub.get("id", "")
-    await _mark_donation(env, "stripe_subscription_id", sub_id, "cancelled")
+    await _mark_donation(env, "stripe_subscription_id", sub_id, "cancelled", allow_downgrade=True)
     print(f"[webhook] Subscription {sub_id} cancelled")
 
 

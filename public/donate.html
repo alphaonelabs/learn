@@ -54,6 +54,7 @@
       </aside>
     </section>
   </main>
+<<<<<<< HEAD
 <script>
     const token = localStorage.getItem('edu_token');
     function showMessage(message, isError) {
@@ -70,6 +71,197 @@
     document.getElementById('donation-form').addEventListener('submit', async event => {
       event.preventDefault();
       const btn = document.getElementById('donate-btn');
+=======
+
+  <div id="site-footer"></div>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none max-w-sm w-full"></div>
+
+  <script src="/js/layout.js" defer></script>
+  <script>
+    const API = '';
+    const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    // State
+    let selectedAmount = 0;
+    let selectedType   = 'one-time';
+    let stripeInstance = null;   // Stripe(publishableKey)
+    let stripeElements = null;   // stripe.elements({clientSecret})
+    let paymentElement = null;   // elements.create('payment')
+
+    const TYPE_DESC = {
+      'one-time': 'Support our mission with a one-time donation',
+      'monthly':  'Support our mission with a recurring monthly donation',
+    };
+
+    // Toast
+    function showToast(msg, type = 'info') {
+      const styles = {
+        success: 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300',
+        error:   'bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300',
+        info:    'bg-teal-50 dark:bg-teal-900/30 border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300',
+      };
+      const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', info: 'fa-info-circle' };
+      const el = document.createElement('div');
+      el.className = `pointer-events-auto rounded-xl border px-4 py-3 text-sm flex items-start gap-2 shadow-lg ${styles[type] || styles.info}`;
+      el.setAttribute('role', 'alert');
+      const icon = document.createElement('i');
+      icon.className = `fas ${icons[type] || icons.info} mt-0.5 shrink-0`;
+      icon.setAttribute('aria-hidden', 'true');
+      const textNode = document.createElement('span');
+      textNode.textContent = msg;
+      el.appendChild(icon);
+      el.appendChild(textNode);
+      document.getElementById('toast-container').appendChild(el);
+      setTimeout(() => { el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),350); }, 4000);
+    }
+
+    // Donation type toggle
+    function onTypeChange(value) {
+      selectedType = value;
+      const active   = 'flex items-center justify-center py-2.5 text-sm font-semibold transition-colors bg-teal-600 text-white';
+      const inactive = 'flex items-center justify-center py-2.5 text-sm font-semibold transition-colors bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600';
+      document.getElementById('tab-one-time').className = value === 'one-time' ? active : inactive;
+      document.getElementById('tab-monthly').className  = value === 'monthly'  ? active : inactive;
+      document.getElementById('type-description').textContent = TYPE_DESC[value];
+      updateSummary();
+    }
+
+    // Amount preset buttons
+    const ACTIVE_BTN   = 'amount-btn px-5 py-2 rounded-lg border-2 border-teal-500 bg-teal-600 text-white text-sm font-bold transition-colors';
+    const INACTIVE_BTN = 'amount-btn px-5 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 text-sm font-bold text-gray-700 dark:text-gray-300 hover:border-teal-500 dark:hover:border-teal-400 transition-colors';
+
+    document.querySelectorAll('.amount-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.amount-btn').forEach(b => {
+          b.className = INACTIVE_BTN;
+          b.setAttribute('aria-pressed', 'false');
+        });
+        btn.className = ACTIVE_BTN;
+        btn.setAttribute('aria-pressed', 'true');
+        selectedAmount = parseFloat(btn.dataset.amount);
+        const customInput = document.getElementById('custom-amount');
+        customInput.value = '';
+        customInput.setAttribute('aria-invalid', 'false');
+        document.getElementById('amount-error').classList.add('hidden');
+        updateSummary();
+      });
+    });
+
+    function onCustomAmount(input) {
+      document.querySelectorAll('.amount-btn').forEach(b => {
+        b.className = INACTIVE_BTN;
+        b.setAttribute('aria-pressed', 'false');
+      });
+      selectedAmount = input.value ? parseFloat(input.value) : 0;
+      input.setAttribute('aria-invalid', 'false');
+      document.getElementById('amount-error').classList.add('hidden');
+      updateSummary();
+    }
+
+    function updateSummary() {
+      document.getElementById('summary-amount').textContent =
+        selectedAmount > 0 ? `$${selectedAmount.toFixed(2)}` : '$0.00';
+    }
+
+    // Step navigation
+    function showStep(step) {
+      document.getElementById('donate-form').classList.toggle('hidden', step !== 1);
+      document.getElementById('payment-step').classList.toggle('hidden', step !== 2);
+      document.getElementById('success-step').classList.toggle('hidden', step !== 3);
+    }
+
+    function backToForm() {
+      // Unmount the Payment Element so it can be re-mounted fresh next time
+      if (paymentElement) { paymentElement.destroy(); paymentElement = null; }
+      stripeElements = null;
+      clearPaymentError();
+      showStep(1);
+    }
+
+    function resetToForm() {
+      document.getElementById('donate-form').reset();
+      document.querySelectorAll('.amount-btn').forEach(b => {
+        b.className = INACTIVE_BTN;
+        b.setAttribute('aria-pressed', 'false');
+      });
+      selectedAmount = 0;
+      // form.reset() restores radio DOM to one-time, but JS state and tab UI
+      // can still reflect the previous type — reset explicitly.
+      onTypeChange('one-time');
+      history.replaceState({}, '', window.location.pathname);
+      backToForm();
+    }
+
+    function clearPaymentError() {
+      const msg = document.getElementById('payment-message');
+      msg.classList.add('hidden');
+      document.getElementById('payment-message-text').textContent = '';
+    }
+
+    function showPaymentError(text) {
+      const msg = document.getElementById('payment-message');
+      document.getElementById('payment-message-text').textContent = text;
+      msg.classList.remove('hidden');
+    }
+
+    // Form validation
+    function validateForm() {
+      let valid = true;
+      const amountInput = document.getElementById('custom-amount');
+      const amountErr   = document.getElementById('amount-error');
+
+      if (!selectedAmount || selectedAmount <= 0) {
+        amountErr.textContent = 'Please select or enter an amount.';
+        amountErr.classList.remove('hidden');
+        amountInput.setAttribute('aria-invalid', 'true');
+        valid = false;
+      } else if (selectedAmount < 1) {
+        amountErr.textContent = 'Minimum donation is $1.00.';
+        amountErr.classList.remove('hidden');
+        amountInput.setAttribute('aria-invalid', 'true');
+        valid = false;
+      } else if (selectedAmount > 10000) {
+        amountErr.textContent = 'Maximum donation is $10,000.00.';
+        amountErr.classList.remove('hidden');
+        amountInput.setAttribute('aria-invalid', 'true');
+        valid = false;
+      } else {
+        amountErr.classList.add('hidden');
+        amountInput.setAttribute('aria-invalid', 'false');
+      }
+
+      const emailInput = document.getElementById('donor-email');
+      const email      = emailInput.value.trim();
+      const emailErr   = document.getElementById('email-error');
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        emailErr.textContent = 'Please enter a valid email address.';
+        emailErr.classList.remove('hidden');
+        emailInput.setAttribute('aria-invalid', 'true');
+        valid = false;
+      } else {
+        emailErr.classList.add('hidden');
+        emailInput.setAttribute('aria-invalid', 'false');
+      }
+
+      return valid;
+    }
+
+    // Step 1 submit — create PaymentIntent/Subscription, mount Stripe Element
+    document.getElementById('donate-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!validateForm()) return;
+
+      if (!stripeInstance) {
+        showToast('Payment processing is not available. Please refresh and try again.', 'error');
+        return;
+      }
+
+      const btn   = document.getElementById('submit-btn');
+      const label = document.getElementById('submit-label');
+      const icon  = document.getElementById('submit-icon');
+>>>>>>> e8d9e9f (fix:update tests)
       btn.disabled = true;
       btn.textContent = 'Creating checkout...';
       const amount = Math.round(Number(document.getElementById('amount').value || 0) * 100);
@@ -94,5 +286,204 @@
         btn.innerHTML = '<i class="fas fa-credit-card mr-2"></i>Donate with Stripe';
       }
     });
+<<<<<<< HEAD
+=======
+
+    async function mountPaymentElement(clientSecret) {
+      if (!stripeInstance) {
+        showToast('Stripe is not initialised. Please refresh and try again.', 'error');
+        return;
+      }
+
+      // Build elements with the appearance matching the site palette
+      const isDark = document.documentElement.classList.contains('dark');
+      stripeElements = stripeInstance.elements({
+        clientSecret,
+        appearance: {
+          theme: isDark ? 'night' : 'stripe',
+          variables: {
+            colorPrimary:    '#0d9488',
+            colorBackground: isDark ? '#1f2937' : '#ffffff',
+            colorText:       isDark ? '#f3f4f6' : '#111827',
+            borderRadius:    '12px',
+            fontFamily:      'system-ui, sans-serif',
+          },
+        },
+      });
+
+      paymentElement = stripeElements.create('payment');
+      paymentElement.mount('#payment-element');
+
+      // Update payment step summary
+      const typeLabel = selectedType === 'monthly' ? 'Monthly donation' : 'One-time donation';
+      document.getElementById('pay-summary-label').textContent = typeLabel;
+      document.getElementById('pay-summary-amount').textContent = `$${selectedAmount.toFixed(2)}`;
+
+      showStep(2);
+      clearPaymentError();
+    }
+
+    // Step 2 — confirm payment with Stripe
+    async function confirmPayment() {
+      if (!stripeInstance || !stripeElements) return;
+
+      const btn   = document.getElementById('confirm-btn');
+      const label = document.getElementById('confirm-label');
+      const icon  = document.getElementById('confirm-icon');
+      btn.disabled = true;
+      icon.className = 'fas fa-spinner fa-spin';
+      label.textContent = 'Processing…';
+      clearPaymentError();
+
+      const returnUrl = `${window.location.origin}${window.location.pathname}`;
+
+      const { error } = await stripeInstance.confirmPayment({
+        elements: stripeElements,
+        confirmParams: { return_url: returnUrl },
+      });
+
+      // confirmPayment only returns here if there was an immediate error
+      // (redirect was prevented, e.g. card declined, validation failed).
+      // Successful payments redirect the browser to return_url automatically.
+      if (error) {
+        if (error.type === 'card_error' || error.type === 'validation_error') {
+          showPaymentError(error.message);
+        } else {
+          showPaymentError('An unexpected error occurred. Please try again.');
+        }
+      }
+
+      btn.disabled = false;
+      icon.className = 'fas fa-lock';
+      label.textContent = 'Complete Donation';
+    }
+
+    // Handle Stripe redirect return (redirect_status in URL)
+    function checkRedirectStatus() {
+      const params = new URLSearchParams(window.location.search);
+      const status = params.get('redirect_status');
+      if (!status) return;
+
+      // Clean the URL so a refresh doesn't re-trigger this
+      history.replaceState({}, '', window.location.pathname);
+
+      if (status === 'succeeded') {
+        showStep(3);
+        loadStats();
+        loadRecentDonations();
+      } else if (status === 'requires_payment_method') {
+        showToast('Payment failed. Please try a different payment method.', 'error');
+      } else {
+        showToast('Payment could not be completed. Please try again.', 'error');
+      }
+    }
+
+    // Stripe initialisation — load publishable key from API
+    async function initStripe() {
+      try {
+        const res  = await fetch(`${API}/api/donations/config`);
+        const data = await res.json();
+        const pub  = data?.data?.publishable_key || '';
+        if (pub && typeof Stripe !== 'undefined') {
+          stripeInstance = Stripe(pub);
+        } else {
+          console.warn('[stripe] Publishable key not available or Stripe.js not loaded.');
+        }
+      } catch (e) {
+        console.warn('[stripe] Could not load config:', e);
+      }
+    }
+
+    // Stats
+    async function loadStats() {
+      try {
+        const res  = await fetch(`${API}/api/donations/stats`);
+        const data = await res.json();
+        if (data.success && data.data) {
+          const total = Number(data.data.total_donated);
+          document.getElementById('stat-total').textContent =
+            `$${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+      } catch (_) {
+        document.getElementById('stat-total').textContent = '$0.00';
+      }
+    }
+
+    // Recent donations
+    async function loadRecentDonations() {
+      const skeletonEl = document.getElementById('donations-skeleton');
+      const listEl     = document.getElementById('donations-list');
+      const emptyEl    = document.getElementById('donations-empty');
+
+      skeletonEl.classList.remove('hidden');
+      listEl.classList.add('hidden');
+      emptyEl.classList.add('hidden');
+
+      try {
+        const res  = await fetch(`${API}/api/donations/recent`);
+        const data = await res.json();
+        const donations = (data.success && data.data && data.data.donations) || [];
+
+        skeletonEl.classList.add('hidden');
+        if (donations.length === 0) { emptyEl.classList.remove('hidden'); return; }
+        listEl.replaceChildren(...donations.map(renderDonation));
+        listEl.classList.remove('hidden');
+      } catch (_) {
+        skeletonEl.classList.add('hidden');
+        emptyEl.classList.remove('hidden');
+      }
+    }
+
+    function renderDonation(d) {
+      const date = d.created_at
+        ? new Date(d.created_at + (d.created_at.endsWith('Z') ? '' : 'Z'))
+            .toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+        : '';
+
+      const card = document.createElement('div');
+      card.className = 'bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-start gap-4';
+
+      const iconWrap = document.createElement('div');
+      iconWrap.className = 'w-10 h-10 rounded-full bg-teal-100 dark:bg-teal-900/40 flex items-center justify-center shrink-0';
+      iconWrap.innerHTML = '<i class="fas fa-heart text-teal-500 dark:text-teal-400 text-sm" aria-hidden="true"></i>';
+
+      const body = document.createElement('div');
+      body.className = 'flex-1 min-w-0';
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'font-semibold text-gray-900 dark:text-gray-100 text-sm';
+      nameEl.textContent = d.donor_name || 'Anonymous';
+      body.appendChild(nameEl);
+
+      if (d.message) {
+        const msgEl = document.createElement('div');
+        msgEl.className = 'text-sm text-gray-500 dark:text-gray-400 mt-0.5';
+        msgEl.textContent = d.message;
+        body.appendChild(msgEl);
+      }
+
+      if (date) {
+        const dateEl = document.createElement('div');
+        dateEl.className = 'text-xs text-gray-400 dark:text-gray-500 mt-1';
+        dateEl.textContent = date;
+        body.appendChild(dateEl);
+      }
+
+      const amountEl = document.createElement('div');
+      amountEl.className = 'font-bold text-teal-600 dark:text-teal-400 text-sm shrink-0';
+      amountEl.textContent = `$${Number(d.amount).toFixed(2)}`;
+
+      card.appendChild(iconWrap);
+      card.appendChild(body);
+      card.appendChild(amountEl);
+      return card;
+    }
+
+    // Boot
+    initStripe();
+    checkRedirectStatus();
+    loadStats();
+    loadRecentDonations();
+>>>>>>> e8d9e9f (fix:update tests)
   </script>
 {% endblock %}
