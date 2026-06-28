@@ -51,6 +51,15 @@ from workers import Response, DurableObject
 import js
 from pyodide.ffi import to_js
 from js import WebSocketPair, WebSocketRequestResponsePair
+
+from api.donations import (
+    get_donation_config,
+    get_donation_stats,
+    get_recent_donations,
+    create_donation_intent,
+    create_subscription_intent,
+    handle_donation_webhook,
+)
 import uuid
 
 _SENTRY_INITIALIZED = False
@@ -7685,6 +7694,20 @@ async def _dispatch(request, env):
             return await api_get_notification_preferences(request, env)
         if path == "/api/notification-preferences" and method == "PATCH":
             return await api_patch_notification_preferences(request, env)
+
+        # Donations
+        if path == "/api/donations/config" and method == "GET":
+            return await get_donation_config(request, env)
+        if path == "/api/donations/stats" and method == "GET":
+            return await get_donation_stats(request, env)
+        if path == "/api/donations/recent" and method == "GET":
+            return await get_recent_donations(request, env)
+        if path == "/api/donations/one-time" and method == "POST":
+            return await create_donation_intent(request, env)
+        if path == "/api/donations/monthly" and method == "POST":
+            return await create_subscription_intent(request, env)
+        if path == "/api/donations/webhook" and method == "POST":
+            return await handle_donation_webhook(request, env)
 
         return err("API endpoint not found", 404)
 
