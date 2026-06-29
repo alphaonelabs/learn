@@ -40,17 +40,10 @@ def _now_utc() -> str:
 
 async def _notify(env, user_id: str, type_: str, title: str, message: str,
                   related_id: Optional[str] = None) -> None:
-    try:
-        await _worker()._create_notification(
-            env, user_id, type_, title, message,
-            related_id=related_id, category="system",
-        )
-    except Exception:
-        # Best-effort: main actions (connections/messages) must not fail solely
-        # because notification delivery had an issue. Errors are already
-        # captured and logged inside _create_notification.
-        return None
-
+    await _worker()._create_notification(
+        env, user_id, type_, title, message,
+        related_id=related_id, category="system",
+    )
 
 async def _user_brief(env, user_id: str, enc: str) -> Optional[dict]:
     row = await env.DB.prepare(
