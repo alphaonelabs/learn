@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Peer Messages - Alpha One Labs">
+  <title>Peer Messages - Alpha One Labs</title>
+  <link rel="icon" type="image/png" href="https://alphaonelabs.com/static/images/logo.png" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: {} } };
+    (function () {
+      if (localStorage.getItem('darkMode') === 'true') document.documentElement.classList.add('dark');
+    })();
+  </script>
+</head>
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-black dark:text-gray-100 transition-colors duration-300 overflow-x-hidden">
+
+  <div id="site-navbar"></div>
+
+  <section class="border-b border-gray-200 dark:border-gray-800 bg-white/70 dark:bg-black/40 backdrop-blur">
+    <div class="max-w-3xl mx-auto px-4 py-5 flex items-center justify-between gap-4">
+      <div>
+        <a href="/peers.html" class="text-sm text-teal-600 dark:text-teal-400 hover:underline mb-1 inline-block">
+          <i class="fas fa-arrow-left mr-1"></i> Back to Peers
+        </a>
+        <h1 id="peer-title" class="text-2xl font-bold flex items-center gap-2">
+          <i class="fas fa-comments text-teal-600 dark:text-teal-400"></i> Messages
+        </h1>
+      </div>
+    </div>
+  </section>
+
+  <main class="flex-1 max-w-3xl w-full mx-auto px-4 py-6">
+    <div class="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-900">
+      <div id="messages-container" class="h-[480px] overflow-y-auto p-4 space-y-3">
+        <div class="animate-pulse h-16 bg-gray-200 dark:bg-gray-800 rounded-lg"></div>
+      </div>
+      <form id="send-form" class="border-t border-gray-200 dark:border-gray-700 p-4 flex gap-2">
+        <input id="message-input" type="text" placeholder="Type a message…" required
+          class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
+        <button type="submit"
+          class="bg-teal-600 hover:bg-teal-700 text-white font-semibold px-5 py-2 rounded-lg text-sm">
+          Send
+        </button>
+      </form>
+    </div>
+  </main>
+
+  <div id="site-footer"></div>
+
+  <script src="/js/layout.js" defer></script>
+  <script>
+    const API = '';
+    const token = localStorage.getItem('edu_token');
+    const user = JSON.parse(localStorage.getItem('edu_user') || 'null');
+    const esc = window.esc || (s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'));
+
+    const params = new URLSearchParams(window.location.search);
+    const peerId = params.get('peer_id');
+
+    if (!token || !user) window.location.href = '/login.html';
+    if (!peerId) window.location.href = '/peers.html';
+
+    let pollTimer = null;
+
+    async function apiFetch(path, opts = {}) {
+      const res = await fetch(`${API}${path}`, {
+        ...opts,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(opts.headers || {}),
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (res.status === 401) {
+        localStorage.removeItem('edu_token');
+        localStorage.removeItem('edu_user');
+        window.location.href = '/login.html';
+        return null;
+      }
+      return res;
+    }
+
+    function formatTime(iso) {
+      if (!iso) return '';
+      const d = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z');
+      if (Number.isNaN(d.getTime())) return iso;
+      return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
+
+    function renderMessages(messages) {
+      const box = document.getElementById('messages-container');
+      if (!messages.length) {
+        box.innerHTML = '<p class="text-center text-gray-500 py-12">No messages yet. Start the conversation!</p>';
+        return;
+      }
+      box.innerHTML = messages.map(m => `
+        <div class="flex ${m.mine ? 'justify-end' : 'justify-start'}">
+          <div class="max-w-[75%] rounded-lg px-4 py-2 ${m.mine
+            ? 'bg-teal-600 text-white'
+            : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'}">
+            <p class="text-sm whitespace-pre-wrap break-words">${esc(m.content)}</p>
+            <p class="text-xs mt-1 opacity-70">${formatTime(m.created_at)}</p>
+          </div>
+        </div>`).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+
+    async function loadThread() {
+      const res = await apiFetch(`/api/peers/messages/${encodeURIComponent(peerId)}`);
+      if (!res) return;
+      if (res.status === 403) {
+        document.getElementById('messages-container').innerHTML =
+          '<p class="text-center text-red-600 py-12">You must be connected with this user to view messages.</p>';
+        document.getElementById('send-form').classList.add('hidden');
+        return;
+      }
+      if (!res.ok) throw new Error('Failed to load messages');
+      const body = await res.json();
+      const data = body.data || {};
+      const peer = data.peer || {};
+      document.getElementById('peer-title').innerHTML =
+        `<i class="fas fa-comments text-teal-600 dark:text-teal-400"></i> ${esc(peer.name || peer.username || 'Peer')}`;
+      renderMessages(data.messages || []);
+    }
+
+    document.getElementById('send-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const input = document.getElementById('message-input');
+      const content = input.value.trim();
+      if (!content) return;
+      input.disabled = true;
+      try {
+        const res = await apiFetch(`/api/peers/messages/${encodeURIComponent(peerId)}`, {
+          method: 'POST',
+          body: JSON.stringify({ content }),
+        });
+        if (!res) return;
+        const body = await res.json();
+        if (!res.ok) {
+          alert(body.error || 'Send failed');
+          return;
+        }
+        input.value = '';
+        await loadThread();
+      } finally {
+        input.disabled = false;
+        input.focus();
+      }
+    });
+
+    loadThread().catch(e => {
+      document.getElementById('messages-container').innerHTML =
+        `<p class="text-red-600 text-center py-8">${esc(e.message)}</p>`;
+    });
+
+    pollTimer = setInterval(() => loadThread().catch(() => {}), 15000);
+    window.addEventListener('beforeunload', () => clearInterval(pollTimer));
+  </script>
+</body>
+</html>

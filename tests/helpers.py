@@ -5,6 +5,7 @@ Shared test helpers: mock Request, mock Env, mock D1 database.
 import base64
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock
 
@@ -18,8 +19,11 @@ _WORKER_PATH = Path(__file__).parent.parent / "src" / "worker.py"
 
 def load_worker():
     """Load and return the worker module from the source tree."""
+    if "worker" in sys.modules:
+        return sys.modules["worker"]
     spec = importlib.util.spec_from_file_location("worker", _WORKER_PATH)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules["worker"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -106,6 +110,16 @@ class MockDB:
             stmt = make_stmt()
         self._idx += 1
         return stmt
+
+    async def batch(self, stmts):
+        """Execute a list of prepared statements (D1 batch stub)."""
+        for stmt in stmts:
+            bound = stmt.bind.return_value if stmt.bind.called else stmt
+            if hasattr(bound, "run"):
+                await bound.run()
+            else:
+                await stmt.run()
+        return []
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,14 @@ API Routes
   POST /api/sessions          – add a session to activity    [host]
   GET  /api/tags              – list all tags
   POST /api/activity-tags     – add tags to an activity      [host]
+  GET  /api/peers             – list connections + discover users (?q=)
+  POST /api/peers/connect/:id – send connection request
+  PATCH /api/peers/:id/:action – accept or reject connection
+  GET/POST /api/peers/messages/:user_id – peer chat thread
+  GET  /api/secure/inbox      – secure message inbox
+  POST /api/secure/send       – send secure message
+  GET  /api/secure/download/:id – download secure message
+  POST /api/secure/toggle-star/:id – toggle secure message star
 
 Security model
   * ALL user PII (username, email, display name, role) is encrypted with
@@ -720,6 +728,51 @@ _DDL = [
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )""",
     "CREATE INDEX IF NOT EXISTS idx_prtoken_user ON password_reset_tokens(user_id)",
+    # Peer connections
+    """CREATE TABLE IF NOT EXISTS peer_connections (
+        id          TEXT PRIMARY KEY,
+        sender_id   TEXT NOT NULL,
+        receiver_id TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'pending',
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (sender_id, receiver_id),
+        FOREIGN KEY (sender_id)   REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_pc_sender   ON peer_connections(sender_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pc_receiver ON peer_connections(receiver_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pc_status   ON peer_connections(status)",
+    # Peer messages
+    """CREATE TABLE IF NOT EXISTS peer_messages (
+        id          TEXT PRIMARY KEY,
+        sender_id   TEXT NOT NULL,
+        receiver_id TEXT NOT NULL,
+        content_enc TEXT NOT NULL,
+        is_read     INTEGER NOT NULL DEFAULT 0,
+        read_at     TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (sender_id)   REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_pm_sender   ON peer_messages(sender_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pm_receiver ON peer_messages(receiver_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pm_thread   ON peer_messages(sender_id, receiver_id)",
+    # Secure messages
+    """CREATE TABLE IF NOT EXISTS secure_messages (
+        id          TEXT PRIMARY KEY,
+        sender_id   TEXT NOT NULL,
+        receiver_id TEXT NOT NULL,
+        content_enc TEXT NOT NULL,
+        is_starred  INTEGER NOT NULL DEFAULT 0,
+        is_read     INTEGER NOT NULL DEFAULT 0,
+        read_at     TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (sender_id)   REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_sm_receiver ON secure_messages(receiver_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sm_sender   ON secure_messages(sender_id)",
 ]
 
 
@@ -2588,6 +2641,24 @@ class PresenceDO(DurableObject):
 # Main dispatcher
 # ---------------------------------------------------------------------------
 
+_PEERS_MODULE = None
+
+
+def _get_peers_module():
+    """Load peers.py from the same directory (works in tests and Workers runtime)."""
+    global _PEERS_MODULE
+    if _PEERS_MODULE is not None:
+        return _PEERS_MODULE
+    import importlib.util
+    from pathlib import Path
+    peers_path = Path(__file__).with_name("peers.py")
+    spec = importlib.util.spec_from_file_location("peers", peers_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _PEERS_MODULE = mod
+    return mod
+
+
 async def _dispatch(request, env):
     path   = urlparse(request.url).path
     method = request.method.upper()
@@ -2707,6 +2778,34 @@ async def _dispatch(request, env):
             return await api_get_notification_preferences(request, env)
         if path == "/api/notification-preferences" and method == "PATCH":
             return await api_patch_notification_preferences(request, env)
+
+        # Peer connections & messaging (A4)
+        peers_api = _get_peers_module()
+        if path == "/api/peers" and method == "GET":
+            return await peers_api.api_list_peers(request, env)
+        m_peer_connect = re.fullmatch(r"/api/peers/connect/([A-Za-z0-9_-]+)", path)
+        if m_peer_connect and method == "POST":
+            return await peers_api.api_connect(request, env, m_peer_connect.group(1))
+        m_peer_action = re.fullmatch(r"/api/peers/([A-Za-z0-9_-]+)/(accept|reject)", path)
+        if m_peer_action and method == "PATCH":
+            return await peers_api.api_handle_connection(
+                request, env, m_peer_action.group(1), m_peer_action.group(2),
+            )
+        m_peer_msgs = re.fullmatch(r"/api/peers/messages/([A-Za-z0-9_-]+)", path)
+        if m_peer_msgs and method == "GET":
+            return await peers_api.api_get_peer_messages(request, env, m_peer_msgs.group(1))
+        if m_peer_msgs and method == "POST":
+            return await peers_api.api_send_peer_message(request, env, m_peer_msgs.group(1))
+        if path == "/api/secure/inbox" and method == "GET":
+            return await peers_api.api_secure_inbox(request, env)
+        if path == "/api/secure/send" and method == "POST":
+            return await peers_api.api_secure_send(request, env)
+        m_secure_dl = re.fullmatch(r"/api/secure/download/([A-Za-z0-9_-]+)", path)
+        if m_secure_dl and method == "GET":
+            return await peers_api.api_secure_download(request, env, m_secure_dl.group(1))
+        m_secure_star = re.fullmatch(r"/api/secure/toggle-star/([A-Za-z0-9_-]+)", path)
+        if m_secure_star and method == "POST":
+            return await peers_api.api_secure_toggle_star(request, env, m_secure_star.group(1))
 
         return err("API endpoint not found", 404)
 
