@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS peer_connections (
     status      TEXT NOT NULL DEFAULT 'pending',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (sender_id <> receiver_id),
     UNIQUE (sender_id, receiver_id),
     FOREIGN KEY (sender_id)   REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
@@ -15,6 +16,12 @@ CREATE TABLE IF NOT EXISTS peer_connections (
 CREATE INDEX IF NOT EXISTS idx_pc_sender   ON peer_connections(sender_id);
 CREATE INDEX IF NOT EXISTS idx_pc_receiver ON peer_connections(receiver_id);
 CREATE INDEX IF NOT EXISTS idx_pc_status   ON peer_connections(status);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pc_pair_unique
+    ON peer_connections (
+        CASE WHEN sender_id < receiver_id THEN sender_id ELSE receiver_id END,
+        CASE WHEN sender_id < receiver_id THEN receiver_id ELSE sender_id END
+    );
 
 CREATE TABLE IF NOT EXISTS peer_messages (
     id          TEXT PRIMARY KEY,

@@ -14,7 +14,7 @@ JWT = "test-jwt-secret"
 ENC = "test-encryption-key"
 
 
-def _parse(resp):
+def _parse(resp) -> dict:
     return json.loads(resp.body)
 
 
@@ -23,7 +23,7 @@ def _enc(val: str) -> str:
     return "v1:" + base64.b64encode(iv + val.encode("utf-8")).decode("ascii")
 
 
-def _auth_header(uid="uid-1", username="alice", role="member"):
+def _auth_header(uid="uid-1", username="alice", role="member") -> dict[str, str]:
     token = worker.create_token(uid, username, role, JWT)
     return {"Authorization": f"Bearer {token}"}
 

@@ -32,11 +32,12 @@
   </section>
 
   <main class="flex-1 max-w-5xl w-full mx-auto px-4 py-6 space-y-8">
-    <section class="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+      <section class="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
       <h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
         <i class="fas fa-search text-teal-600 dark:text-teal-400"></i> Discover Users
       </h2>
       <div class="flex gap-2 flex-wrap">
+        <label for="search-q" class="sr-only">Search peers</label>
         <input id="search-q" type="search" placeholder="Search by name or username…"
           class="flex-1 min-w-[200px] rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
         <button type="button" onclick="searchUsers()"
@@ -102,7 +103,7 @@
 
     function renderPending(items) {
       const el = document.getElementById('pending-list');
-      const pending = items.filter(c => c.status === 'pending' && c.direction === 'received');
+      const pending = items.filter(c => c.status === 'pending');
       if (!pending.length) {
         el.innerHTML = `<div class="p-8 text-center text-gray-500 dark:text-gray-400">
           <i class="fas fa-inbox text-4xl mb-3 block opacity-50"></i>
@@ -116,14 +117,18 @@
             <div class="text-sm text-gray-500">Sent ${esc(c.created_at || '')}</div>
           </div>
           <div class="flex gap-2">
-            <button type="button" onclick="handleConnection('${esc(c.id)}','accept')"
-              class="bg-green-500 hover:bg-green-600 text-white font-semibold px-3 py-2 rounded-lg text-sm">
-              <i class="fas fa-check mr-1"></i> Accept
-            </button>
-            <button type="button" onclick="handleConnection('${esc(c.id)}','reject')"
-              class="border border-red-300 text-red-700 dark:text-red-300 font-semibold px-3 py-2 rounded-lg text-sm">
-              <i class="fas fa-times mr-1"></i> Reject
-            </button>
+            ${c.direction === 'received' ? `
+              <button type="button" onclick="handleConnection('${esc(c.id)}','accept')"
+                class="bg-green-500 hover:bg-green-600 text-white font-semibold px-3 py-2 rounded-lg text-sm">
+                <i class="fas fa-check mr-1"></i> Accept
+              </button>
+              <button type="button" onclick="handleConnection('${esc(c.id)}','reject')"
+                class="border border-red-300 text-red-700 dark:text-red-300 font-semibold px-3 py-2 rounded-lg text-sm">
+                <i class="fas fa-times mr-1"></i> Reject
+              </button>
+            ` : `
+              <span class="text-sm text-gray-500">Awaiting response</span>
+            `}
           </div>
         </div>`).join('');
     }

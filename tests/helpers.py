@@ -24,7 +24,11 @@ def load_worker():
     spec = importlib.util.spec_from_file_location("worker", _WORKER_PATH)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["worker"] = mod
-    spec.loader.exec_module(mod)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        sys.modules.pop("worker", None)
+        raise
     return mod
 
 

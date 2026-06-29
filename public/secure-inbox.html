@@ -36,8 +36,10 @@
     <section class="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
       <h2 class="text-lg font-semibold mb-3">Compose Secure Message</h2>
       <form id="compose-form" class="space-y-3">
+        <label for="recipient" class="sr-only">Recipient username</label>
         <input id="recipient" type="text" placeholder="Recipient username" required
           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
+        <label for="message-body" class="sr-only">Message</label>
         <textarea id="message-body" rows="3" placeholder="Your message…" required
           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"></textarea>
         <button type="submit"
@@ -168,21 +170,33 @@
 
     document.getElementById('compose-form').addEventListener('submit', async e => {
       e.preventDefault();
-      const recipient = document.getElementById('recipient').value.trim();
-      const message = document.getElementById('message-body').value.trim();
+      const recipientInput = document.getElementById('recipient');
+      const messageInput = document.getElementById('message-body');
+      const submit = e.submitter || document.querySelector('#compose-form button[type="submit"]');
+      const recipient = recipientInput.value.trim();
+      const message = messageInput.value.trim();
       if (!recipient || !message) return;
-      const res = await apiFetch('/api/secure/send', {
-        method: 'POST',
-        body: JSON.stringify({ recipient_username: recipient, message }),
-      });
-      if (!res) return;
-      const body = await res.json();
-      if (!res.ok) {
-        alert(body.error || 'Send failed');
-        return;
+      recipientInput.disabled = true;
+      messageInput.disabled = true;
+      if (submit) submit.disabled = true;
+      try {
+        const res = await apiFetch('/api/secure/send', {
+          method: 'POST',
+          body: JSON.stringify({ recipient_username: recipient, message }),
+        });
+        if (!res) return;
+        const body = await res.json();
+        if (!res.ok) {
+          alert(body.error || 'Send failed');
+          return;
+        }
+        messageInput.value = '';
+        alert(body.message || 'Sent');
+      } finally {
+        recipientInput.disabled = false;
+        messageInput.disabled = false;
+        if (submit) submit.disabled = false;
       }
-      document.getElementById('message-body').value = '';
-      alert(body.message || 'Sent');
     });
 
     loadInbox().catch(e => {

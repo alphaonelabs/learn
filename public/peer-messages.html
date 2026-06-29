@@ -38,6 +38,7 @@
         <div class="animate-pulse h-16 bg-gray-200 dark:bg-gray-800 rounded-lg"></div>
       </div>
       <form id="send-form" class="border-t border-gray-200 dark:border-gray-700 p-4 flex gap-2">
+        <label for="message-input" class="sr-only">Message</label>
         <input id="message-input" type="text" placeholder="Type a message…" required
           class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
         <button type="submit"
@@ -129,9 +130,11 @@
     document.getElementById('send-form').addEventListener('submit', async e => {
       e.preventDefault();
       const input = document.getElementById('message-input');
+      const submit = e.submitter || document.querySelector('#send-form button[type="submit"]');
       const content = input.value.trim();
       if (!content) return;
       input.disabled = true;
+      if (submit) submit.disabled = true;
       try {
         const res = await apiFetch(`/api/peers/messages/${encodeURIComponent(peerId)}`, {
           method: 'POST',
@@ -147,6 +150,7 @@
         await loadThread();
       } finally {
         input.disabled = false;
+        if (submit) submit.disabled = false;
         input.focus();
       }
     });

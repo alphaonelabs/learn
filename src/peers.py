@@ -40,10 +40,16 @@ def _now_utc() -> str:
 
 async def _notify(env, user_id: str, type_: str, title: str, message: str,
                   related_id: Optional[str] = None) -> None:
-    await _worker()._create_notification(
-        env, user_id, type_, title, message,
-        related_id=related_id, category="system",
-    )
+    try:
+        await _worker()._create_notification(
+            env, user_id, type_, title, message,
+            related_id=related_id, category="system",
+        )
+    except Exception:
+        # Best-effort: main actions (connections/messages) must not fail solely
+        # because notification delivery had an issue. Errors are already
+        # captured and logged inside _create_notification.
+        return None
 
 
 async def _user_brief(env, user_id: str, enc: str) -> Optional[dict]:
@@ -95,7 +101,7 @@ def _format_expires(created_at: str) -> str:
 
 
 async def _discover_users(env, current_id: str, query: str, enc: str, limit: int = 20) -> list:
-    q = query.strip().lower()
+    q = (query or "").strip().lower()
     if len(q) < 1:
         return []
     rows = await env.DB.prepare(
@@ -153,7 +159,8 @@ async def api_list_peers(req, env):
 
     parsed = urlparse(req.url)
     params = parse_qs(parsed.query)
-    q = (params.get("q") or [""])[0].strip()
+    raw_q = (params.get("q") or [""])[0]
+    q = raw_q.strip() if isinstance(raw_q, str) else ""
     discover = await _discover_users(env, uid, q, enc) if q else []
 
     return ok({
@@ -302,7 +309,13 @@ async def api_send_peer_message(req, env, peer_user_id: str):
     if bad_resp:
         return bad_resp
 
-    content = (body.get("content") or "").strip()
+    raw_content = body.get("content")
+    if raw_content is None:
+        content = ""
+    elif isinstance(raw_content, str):
+        content = raw_content.strip()
+    else:
+        return err("content must be a string", 400)
     if not content:
         return err("content is required", 400)
 
@@ -345,8 +358,21 @@ async def api_send_peer_message(req, env, peer_user_id: str):
 
 
 async def _resolve_recipient(env, body: dict, enc: str):
-    recipient_id = (body.get("recipient_id") or "").strip()
-    recipient_username = (body.get("recipient_username") or body.get("recipient") or "").strip()
+    raw_recipient_id = body.get("recipient_id")
+    if raw_recipient_id is None:
+        recipient_id = ""
+    elif isinstance(raw_recipient_id, str):
+        recipient_id = raw_recipient_id.strip()
+    else:
+        return None
+
+    raw_recipient_username = body.get("recipient_username") or body.get("recipient")
+    if raw_recipient_username is None:
+        recipient_username = ""
+    elif isinstance(raw_recipient_username, str):
+        recipient_username = raw_recipient_username.strip()
+    else:
+        return None
 
     if recipient_id:
         row = await env.DB.prepare("SELECT id FROM users WHERE id = ?").bind(recipient_id).first()
@@ -413,7 +439,13 @@ async def api_secure_send(req, env):
     if bad_resp:
         return bad_resp
 
-    message = (body.get("message") or body.get("content") or "").strip()
+    raw_message = body.get("message") or body.get("content")
+    if raw_message is None:
+        message = ""
+    elif isinstance(raw_message, str):
+        message = raw_message.strip()
+    else:
+        return err("message must be a string", 400)
     if not message:
         return err("message is required", 400)
 
