@@ -14,6 +14,13 @@ API Routes
   POST /api/sessions          – add a session to activity    [host]
   GET  /api/tags              – list all tags
   POST /api/activity-tags     – add tags to an activity      [host]
+  GET  /api/surveys              – list surveys (?q=&limit=&offset=)
+  POST /api/surveys              – create survey                [auth]
+  GET  /api/surveys/:id          – survey detail
+  DELETE /api/surveys/:id        – delete survey                [owner]
+  POST /api/surveys/:id/responses – submit a response
+  GET  /api/surveys/:id/results   – survey analytics
+  GET  /api/surveys/:id/export    – export responses as CSV
 
 Security model
   * ALL user PII (username, email, display name, role) is encrypted with
@@ -39,12 +46,29 @@ import hmac as _hmac
 import json
 import os
 import re
+import sys
 import traceback
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse, parse_qs, urlencode
 
+# Allow importing sibling modules (surveys.py, api/surveys.py) — the
+# Worker entrypoint is loaded by absolute path, so its own directory is not
+# automatically on sys.path.
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+
 from workers import Response, DurableObject
+from api.surveys import (
+    api_list_surveys,
+    api_create_survey,
+    api_get_survey,
+    api_submit_survey_response,
+    api_get_survey_results,
+    api_delete_survey,
+    api_export_survey,
+)
 
 import js
 from pyodide.ffi import to_js
@@ -2707,6 +2731,30 @@ async def _dispatch(request, env):
             return await api_get_notification_preferences(request, env)
         if path == "/api/notification-preferences" and method == "PATCH":
             return await api_patch_notification_preferences(request, env)
+
+        # Surveys
+        if path == "/api/surveys" and method == "GET":
+            return await api_list_surveys(request, env)
+        if path == "/api/surveys" and method == "POST":
+            return await api_create_survey(request, env)
+
+        m_survey_results = re.fullmatch(r"/api/surveys/([A-Za-z0-9_-]+)/results", path)
+        if m_survey_results and method == "GET":
+            return await api_get_survey_results(m_survey_results.group(1), request, env)
+
+        m_survey_export = re.fullmatch(r"/api/surveys/([A-Za-z0-9_-]+)/export", path)
+        if m_survey_export and method == "GET":
+            return await api_export_survey(m_survey_export.group(1), request, env)
+
+        m_survey_responses = re.fullmatch(r"/api/surveys/([A-Za-z0-9_-]+)/responses", path)
+        if m_survey_responses and method == "POST":
+            return await api_submit_survey_response(m_survey_responses.group(1), request, env)
+
+        m_survey = re.fullmatch(r"/api/surveys/([A-Za-z0-9_-]+)", path)
+        if m_survey and method == "GET":
+            return await api_get_survey(m_survey.group(1), request, env)
+        if m_survey and method == "DELETE":
+            return await api_delete_survey(m_survey.group(1), request, env)
 
         return err("API endpoint not found", 404)
 

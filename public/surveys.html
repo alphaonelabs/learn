@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>All Surveys - Alpha One Labs</title>
+  <link rel="icon" type="image/png" href="https://alphaonelabs.com/static/images/logo.png" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: {} } }
+    function initializeDarkMode() {
+      const darkModeEnabled = localStorage.getItem('darkMode') === 'true';
+      if (darkModeEnabled) {
+        document.documentElement.classList.add('dark');
+      } else if (localStorage.getItem('darkMode') === null) {
+        localStorage.setItem('darkMode', 'false');
+      }
+    }
+    initializeDarkMode();
+    document.addEventListener('DOMContentLoaded', initializeDarkMode);
+  </script>
+
+  <style>
+    html, body { overflow-x: hidden; box-sizing: border-box; }
+    .dark { color-scheme: dark; }
+    :root { color-scheme: light; }
+
+    .skeleton {
+      background: linear-gradient(90deg, rgba(150,150,150,0.15) 25%, rgba(150,150,150,0.25) 37%, rgba(150,150,150,0.15) 63%);
+      background-size: 400% 100%;
+      animation: skeleton-loading 1.4s ease infinite;
+    }
+    @keyframes skeleton-loading { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+    #toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; display: flex; flex-direction: column; gap: 0.5rem; }
+    .toast { min-width: 260px; max-width: 360px; padding: 0.875rem 1rem; border-radius: 0.75rem; color: #fff; font-size: 0.875rem; box-shadow: 0 10px 25px rgba(0,0,0,0.2); animation: toast-in 0.2s ease; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .toast-success { background: #059669; }
+    .toast-error { background: #DC2626; }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col bg-white text-gray-900 dark:bg-black dark:text-gray-100 transition-colors duration-300 overflow-x-hidden">
+
+  <div id="site-navbar"></div>
+
+  <main class="flex-1 w-full max-w-[90rem] mx-auto mt-6 px-4 md:px-6 mb-12">
+    <div class="flex flex-wrap gap-4 justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold flex items-center">
+        <i class="fa-solid fa-list-alt text-teal-600 dark:text-teal-400 mr-2" aria-hidden="true"></i>
+        All Surveys
+      </h1>
+      <div class="flex items-center gap-3">
+        <div class="relative">
+          <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+          <input id="search" type="text" placeholder="Search surveys…"
+            class="pl-9 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-teal-300 dark:focus:ring-teal-700" />
+        </div>
+        <a href="/survey-create.html"
+          class="bg-teal-600 hover:bg-teal-700 text-white font-semibold px-4 py-2 rounded-lg flex items-center whitespace-nowrap">
+          <i class="fa-solid fa-plus mr-2"></i>Create New Survey
+        </a>
+      </div>
+    </div>
+
+    <div id="skeleton" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden divide-y divide-gray-200 dark:divide-gray-700">
+      <div class="p-4 flex items-center justify-between"><div class="skeleton h-5 w-48 rounded"></div><div class="skeleton h-8 w-40 rounded"></div></div>
+      <div class="p-4 flex items-center justify-between"><div class="skeleton h-5 w-40 rounded"></div><div class="skeleton h-8 w-40 rounded"></div></div>
+      <div class="p-4 flex items-center justify-between"><div class="skeleton h-5 w-56 rounded"></div><div class="skeleton h-8 w-40 rounded"></div></div>
+    </div>
+
+    <div id="survey-list-container" class="hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+      <ul id="survey-list" class="divide-y divide-gray-200 dark:divide-gray-700"></ul>
+    </div>
+
+    <div id="empty-state" class="hidden text-center text-gray-400 dark:text-gray-500 py-20 border border-gray-200 dark:border-gray-700 rounded-lg">
+      <i class="fas fa-poll text-4xl mb-4 block opacity-50"></i>
+      <p class="mb-3">No surveys found.</p>
+      <a href="/survey-create.html" class="inline-flex items-center gap-2 text-teal-600 dark:text-teal-400 font-semibold hover:underline">
+        <i class="fas fa-plus"></i>Create the first survey
+      </a>
+    </div>
+
+    <div id="error-state" class="hidden text-center text-red-400 py-20">
+      <i class="fas fa-triangle-exclamation text-4xl mb-4 block opacity-50"></i>
+      <p>Failed to load surveys. Please try again.</p>
+    </div>
+  </main>
+
+  <div id="site-footer"></div>
+  <div id="toast-container"></div>
+
+  <div id="confirm-modal" class="hidden fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-black/50">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-sm w-full p-6">
+      <div class="flex items-start gap-3 mb-5">
+        <div class="shrink-0 w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600 dark:text-red-400">
+          <i class="fas fa-triangle-exclamation"></i>
+        </div>
+        <div>
+          <h3 id="confirm-modal-title" class="font-bold text-gray-800 dark:text-gray-200">Delete survey?</h3>
+          <p id="confirm-modal-message" class="text-sm text-gray-500 dark:text-gray-400 mt-1">This cannot be undone.</p>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2">
+        <button onclick="closeConfirmModal()" class="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">Cancel</button>
+        <button id="confirm-modal-confirm-btn" class="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/layout.js" defer></script>
+  <script>
+    const token = localStorage.getItem('edu_token');
+    const user = JSON.parse(localStorage.getItem('edu_user') || 'null');
+
+    function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toast-container');
+      const el = document.createElement('div');
+      el.className = `toast toast-${type}`;
+      el.textContent = message;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+
+    let allSurveys = [];
+
+    function renderRow(s) {
+      return `
+        <li class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+          <div class="flex flex-wrap justify-between items-center gap-3 p-4">
+            <div class="flex items-center min-w-0">
+              <i class="fa-solid fa-clipboard-list text-teal-600 dark:text-teal-400 mr-3 text-lg shrink-0"></i>
+              <div class="min-w-0">
+                <a href="/survey.html?id=${esc(s.id)}" class="text-lg font-medium text-gray-900 dark:text-gray-100 hover:text-teal-600 dark:hover:text-teal-400 truncate">
+                  ${esc(s.title)}
+                </a>
+                <div class="flex flex-wrap items-center gap-2 mt-1">
+                  <span class="text-sm text-gray-500 dark:text-gray-400">${s.question_count} question${s.question_count === 1 ? '' : 's'}</span>
+                  <span class="text-sm text-gray-400 dark:text-gray-500">·</span>
+                  <span class="text-sm text-gray-500 dark:text-gray-400">${s.participant_count} participant${s.participant_count === 1 ? '' : 's'}</span>
+                  ${s.is_owner ? `<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300">Your Survey</span>` : ''}
+                </div>
+              </div>
+            </div>
+            <div class="flex space-x-2 shrink-0">
+              <a href="/survey.html?id=${esc(s.id)}"
+                class="bg-teal-600 hover:bg-teal-700 text-white font-medium px-4 py-2 rounded-lg flex items-center text-sm">
+                <i class="fa-solid fa-pencil mr-2"></i>Take Survey
+              </a>
+              <a href="/survey-results.html?id=${esc(s.id)}"
+                class="bg-blue-500 hover:bg-blue-600 text-white font-medium px-4 py-2 rounded-lg flex items-center text-sm">
+                <i class="fa-solid fa-chart-bar mr-2"></i>Results
+              </a>
+              ${s.is_owner ? `
+                <button onclick="deleteSurvey('${esc(s.id)}')"
+                  class="bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 font-medium px-3 py-2 rounded-lg flex items-center text-sm" title="Delete survey">
+                  <i class="fa-solid fa-trash"></i>
+                </button>` : ''}
+            </div>
+          </div>
+        </li>`;
+    }
+
+    function renderList() {
+      const q = document.getElementById('search').value.trim().toLowerCase();
+      const filtered = q
+        ? allSurveys.filter(s => s.title.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q))
+        : allSurveys;
+
+      const container = document.getElementById('survey-list-container');
+      const empty = document.getElementById('empty-state');
+      if (!filtered.length) {
+        container.classList.add('hidden');
+        empty.classList.remove('hidden');
+      } else {
+        empty.classList.add('hidden');
+        container.classList.remove('hidden');
+        document.getElementById('survey-list').innerHTML = filtered.map(renderRow).join('');
+      }
+    }
+
+    async function loadSurveys() {
+      try {
+        const headers = token ? { Authorization: 'Bearer ' + token } : {};
+        const res = await fetch('/api/surveys?limit=50', { headers });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to load surveys');
+        allSurveys = data.surveys || [];
+        document.getElementById('skeleton').classList.add('hidden');
+        renderList();
+      } catch (e) {
+        document.getElementById('skeleton').classList.add('hidden');
+        document.getElementById('error-state').classList.remove('hidden');
+        console.error(e);
+      }
+    }
+
+    let _confirmCallback = null;
+
+    function showConfirmModal(message, onConfirm) {
+      document.getElementById('confirm-modal-message').textContent = message;
+      _confirmCallback = onConfirm;
+      document.getElementById('confirm-modal').classList.remove('hidden');
+    }
+
+    function closeConfirmModal() {
+      document.getElementById('confirm-modal').classList.add('hidden');
+      _confirmCallback = null;
+    }
+
+    document.getElementById('confirm-modal-confirm-btn').addEventListener('click', () => {
+      const cb = _confirmCallback;
+      closeConfirmModal();
+      if (cb) cb();
+    });
+
+    async function deleteSurvey(id) {
+      showConfirmModal('This will permanently delete the survey and all its responses. This cannot be undone.', async () => {
+        try {
+          const res = await fetch('/api/surveys/' + id, {
+            method: 'DELETE',
+            headers: { Authorization: 'Bearer ' + token },
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed to delete survey');
+          showToast('Survey deleted', 'success');
+          allSurveys = allSurveys.filter(s => s.id !== id);
+          renderList();
+        } catch (e) {
+          showToast(e.message, 'error');
+        }
+      });
+    }
+
+    document.getElementById('search').addEventListener('input', renderList);
+
+    loadSurveys();
+  </script>
+</body>
+</html>

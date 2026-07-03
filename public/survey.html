@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Survey - Alpha One Labs</title>
+  <link rel="icon" type="image/png" href="https://alphaonelabs.com/static/images/logo.png" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: {} } }
+    function initializeDarkMode() {
+      const darkModeEnabled = localStorage.getItem('darkMode') === 'true';
+      if (darkModeEnabled) document.documentElement.classList.add('dark');
+      else if (localStorage.getItem('darkMode') === null) localStorage.setItem('darkMode', 'false');
+    }
+    initializeDarkMode();
+    document.addEventListener('DOMContentLoaded', initializeDarkMode);
+  </script>
+
+  <style>
+    html, body { overflow-x: hidden; box-sizing: border-box; }
+    .dark { color-scheme: dark; }
+    :root { color-scheme: light; }
+
+    .gradient-hero { background: linear-gradient(135deg, #0F766E 0%, #0D9488 50%, #06B6D4 100%); }
+    .gradient-hero.dark { background: linear-gradient(135deg, #134E4A 0%, #0F766E 50%, #164E63 100%); }
+
+    .field-input {
+      width: 100%; padding: 0.625rem 0.875rem; border-radius: 0.75rem;
+      border: 1px solid rgb(209 213 219); font-size: 0.875rem; background: #fff; color: #111827;
+    }
+    .dark .field-input { background: #1f2937; border-color: #374151; color: #f3f4f6; }
+    .field-input:focus { outline: none; box-shadow: 0 0 0 2px rgba(13,148,136,0.4); border-color: #0D9488; }
+
+    .option-label { display: flex; align-items: center; gap: 0.625rem; padding: 0.75rem 1rem; border-radius: 0.75rem; border: 1px solid rgb(229 231 235); cursor: pointer; transition: border-color .15s, background .15s; }
+    .dark .option-label { border-color: #374151; }
+    .option-label:hover { border-color: #0D9488; background: rgba(13,148,136,0.05); }
+    .option-label.selected { border-color: #0D9488; background: rgba(13,148,136,0.08); }
+
+    .scale-btn { width: 2.75rem; height: 2.75rem; border-radius: 9999px; border: 1px solid rgb(209 213 219); font-weight: 700; transition: all .15s; }
+    .dark .scale-btn { border-color: #374151; }
+    .scale-btn.selected { background: #0D9488; color: #fff; border-color: #0D9488; }
+
+    .tf-btn { transition: all .15s; }
+    .dark .tf-btn { border-color: #374151; }
+    .tf-btn.selected { background: #0D9488; color: #fff; border-color: #0D9488; }
+
+    .skeleton { background: linear-gradient(90deg, rgba(150,150,150,0.15) 25%, rgba(150,150,150,0.25) 37%, rgba(150,150,150,0.15) 63%); background-size: 400% 100%; animation: skeleton-loading 1.4s ease infinite; }
+    @keyframes skeleton-loading { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+    #toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; display: flex; flex-direction: column; gap: 0.5rem; }
+    .toast { min-width: 260px; max-width: 360px; padding: 0.875rem 1rem; border-radius: 0.75rem; color: #fff; font-size: 0.875rem; box-shadow: 0 10px 25px rgba(0,0,0,0.2); animation: toast-in 0.2s ease; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .toast-success { background: #059669; }
+    .toast-error { background: #DC2626; }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col bg-gray-50 text-gray-900 dark:bg-black dark:text-gray-100 transition-colors duration-300 overflow-x-hidden">
+
+  <div id="site-navbar"></div>
+
+  <section class="gradient-hero text-white py-12 relative overflow-hidden">
+    <div class="relative max-w-3xl mx-auto px-4 md:px-6">
+      <nav class="text-teal-100 text-sm mb-4 flex items-center gap-2">
+        <a href="/surveys.html" class="hover:text-white transition flex items-center gap-1"><i class="fas fa-arrow-left"></i>Surveys</a>
+      </nav>
+      <h1 id="survey-title" class="text-3xl md:text-4xl font-extrabold text-white leading-tight mb-2">Loading…</h1>
+      <p id="survey-description" class="text-teal-100"></p>
+    </div>
+  </section>
+
+  <main class="flex-1 max-w-3xl mx-auto w-full px-4 md:px-6 py-10">
+
+    <div id="skeleton" class="space-y-4">
+      <div class="skeleton h-24 w-full rounded-2xl"></div>
+      <div class="skeleton h-24 w-full rounded-2xl"></div>
+      <div class="skeleton h-24 w-full rounded-2xl"></div>
+    </div>
+
+    <div id="error-state" class="hidden text-center text-red-400 py-20">
+      <i class="fas fa-triangle-exclamation text-5xl mb-4 block opacity-50"></i>
+      <p id="error-message" class="text-lg">This survey could not be loaded.</p>
+    </div>
+
+    <form id="survey-form" class="hidden space-y-6" onsubmit="return false;">
+      <div class="sticky top-0 z-10 bg-gray-50/90 dark:bg-black/90 backdrop-blur py-3 -mx-4 px-4 md:mx-0 md:px-0">
+        <div class="flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
+          <span id="progress-label">0 of 0 answered</span>
+          <span id="progress-percent">0%</span>
+        </div>
+        <div class="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+          <div id="progress-bar" class="h-full bg-teal-600 transition-all" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div id="questions-container" class="space-y-5"></div>
+
+      <button type="button" id="submit-btn" onclick="submitResponse()"
+        class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3.5 rounded-xl shadow-lg hover:shadow-xl transition-all">
+        <i class="fas fa-paper-plane mr-2"></i>Submit Response
+      </button>
+    </form>
+
+    <div id="success-state" class="hidden text-center py-20">
+      <div class="text-6xl mb-5">🎉</div>
+      <h2 class="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-2">Thanks for your response!</h2>
+      <p class="text-gray-500 dark:text-gray-400 mb-6">Your answers have been recorded.</p>
+      <div class="flex items-center justify-center gap-3">
+        <a id="view-results-link" href="#" class="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold transition">
+          <i class="fas fa-chart-pie mr-1"></i>View Results
+        </a>
+        <a href="/surveys.html" class="px-5 py-2.5 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold transition">
+          Back to Surveys
+        </a>
+      </div>
+    </div>
+
+    <div id="duplicate-state" class="hidden text-center py-20">
+      <div class="text-5xl mb-5">✅</div>
+      <h2 class="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-2">You've already responded</h2>
+      <p class="text-gray-500 dark:text-gray-400 mb-6">Each participant can only submit one response per survey.</p>
+      <a id="duplicate-results-link" href="#" class="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold transition">
+        <i class="fas fa-chart-pie mr-1"></i>View Results
+      </a>
+    </div>
+  </main>
+
+  <div id="site-footer"></div>
+  <div id="toast-container"></div>
+
+  <script src="/js/layout.js" defer></script>
+  <script>
+    const token = localStorage.getItem('edu_token');
+    const params = new URLSearchParams(location.search);
+    const surveyId = params.get('id');
+
+    function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toast-container');
+      const el = document.createElement('div');
+      el.className = `toast toast-${type}`;
+      el.textContent = message;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+
+    let survey = null;
+    const answers = {};
+
+    function questionHtml(q, index) {
+      let body = '';
+      if (q.type === 'multiple_choice') {
+        body = q.options.map(o => `
+          <label class="option-label" data-question="${q.id}" data-value="${esc(o.text)}">
+            <input type="radio" name="${q.id}" value="${esc(o.text)}" class="text-teal-600 focus:ring-teal-500"
+              onchange="setAnswer('${q.id}', this.value)" />
+            <span class="text-sm text-gray-700 dark:text-gray-200">${esc(o.text)}</span>
+          </label>`).join('');
+      } else if (q.type === 'checkbox') {
+        body = q.options.map(o => `
+          <label class="option-label" data-question="${q.id}" data-value="${esc(o.text)}">
+            <input type="checkbox" value="${esc(o.text)}" class="rounded text-teal-600 focus:ring-teal-500"
+              onchange="toggleCheckboxAnswer('${q.id}', this.value, this.checked)" />
+            <span class="text-sm text-gray-700 dark:text-gray-200">${esc(o.text)}</span>
+          </label>`).join('');
+      } else if (q.type === 'true_false') {
+        body = `
+          <div class="flex gap-3">
+            <button type="button" data-question="${q.id}" data-value="true" onclick="setToggleAnswer('${q.id}', 'true')"
+              class="tf-btn flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 font-semibold text-sm transition">
+              <i class="fas fa-check mr-1.5"></i>True
+            </button>
+            <button type="button" data-question="${q.id}" data-value="false" onclick="setToggleAnswer('${q.id}', 'false')"
+              class="tf-btn flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 font-semibold text-sm transition">
+              <i class="fas fa-xmark mr-1.5"></i>False
+            </button>
+          </div>`;
+      } else if (q.type === 'scale') {
+        body = `
+          <div class="flex items-center justify-between gap-2">
+            ${[1,2,3,4,5].map(n => `
+              <button type="button" data-question="${q.id}" data-value="${n}" onclick="setToggleAnswer('${q.id}', '${n}')" class="scale-btn">${n}</button>`).join('')}
+          </div>
+          <div class="flex justify-between text-xs text-gray-400 mt-1.5"><span>Strongly Disagree</span><span>Strongly Agree</span></div>`;
+      } else {
+        body = `<textarea rows="3" placeholder="Type your answer…" class="field-input" oninput="setAnswer('${q.id}', this.value)"></textarea>`;
+      }
+
+      return `
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 p-5" data-question-card="${q.id}">
+          <p class="font-semibold text-gray-800 dark:text-gray-200 mb-3">
+            <span class="text-teal-600 dark:text-teal-400 mr-1">${index + 1}.</span>${esc(q.text)}
+            ${q.required ? '<span class="text-red-500 ml-1">*</span>' : ''}
+          </p>
+          <div class="space-y-2">${body}</div>
+        </div>`;
+    }
+
+    function setAnswer(qid, value) {
+      if (value && value.trim()) answers[qid] = value;
+      else delete answers[qid];
+      updateProgress();
+    }
+
+    function setToggleAnswer(qid, value) {
+      answers[qid] = value;
+      document.querySelectorAll(`[data-question="${qid}"]`).forEach(el => {
+        el.classList.toggle('selected', el.getAttribute('data-value') === value);
+      });
+      updateProgress();
+    }
+
+    function toggleCheckboxAnswer(qid, value, checked) {
+      const current = Array.isArray(answers[qid]) ? answers[qid] : [];
+      const next = checked ? [...current, value] : current.filter(v => v !== value);
+      if (next.length) answers[qid] = next; else delete answers[qid];
+      document.querySelectorAll(`[data-question="${qid}"]`).forEach(el => {
+        el.classList.toggle('selected', next.includes(el.getAttribute('data-value')));
+      });
+      updateProgress();
+    }
+
+    document.addEventListener('change', (e) => {
+      if (e.target.matches('input[type=radio]')) {
+        const qid = e.target.name;
+        document.querySelectorAll(`[data-question="${qid}"]`).forEach(el => {
+          el.classList.toggle('selected', el.getAttribute('data-value') === e.target.value);
+        });
+      }
+    });
+
+    function updateProgress() {
+      if (!survey) return;
+      const total = survey.questions.length;
+      const answered = survey.questions.filter(q => {
+        const v = answers[q.id];
+        return Array.isArray(v) ? v.length > 0 : !!v;
+      }).length;
+      const pct = total ? Math.round((answered / total) * 100) : 0;
+      document.getElementById('progress-label').textContent = `${answered} of ${total} answered`;
+      document.getElementById('progress-percent').textContent = `${pct}%`;
+      document.getElementById('progress-bar').style.width = `${pct}%`;
+    }
+
+    function renderSurvey() {
+      document.title = survey.title + ' - Alpha One Labs';
+      document.getElementById('survey-title').textContent = survey.title;
+      document.getElementById('survey-description').textContent = survey.description || '';
+      document.getElementById('questions-container').innerHTML = survey.questions.map(questionHtml).join('');
+      updateProgress();
+      document.getElementById('skeleton').classList.add('hidden');
+      document.getElementById('survey-form').classList.remove('hidden');
+    }
+
+    async function loadSurvey() {
+      if (!surveyId) {
+        document.getElementById('skeleton').classList.add('hidden');
+        document.getElementById('error-message').textContent = 'No survey specified.';
+        document.getElementById('error-state').classList.remove('hidden');
+        return;
+      }
+      try {
+        const headers = token ? { Authorization: 'Bearer ' + token } : {};
+        const res = await fetch('/api/surveys/' + surveyId, { headers });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Survey not found');
+        survey = data.survey;
+        renderSurvey();
+      } catch (e) {
+        document.getElementById('skeleton').classList.add('hidden');
+        document.getElementById('error-message').textContent = e.message;
+        document.getElementById('error-state').classList.remove('hidden');
+      }
+    }
+
+    async function submitResponse() {
+      const missingRequired = survey.questions.find(q => {
+        if (!q.required) return false;
+        const v = answers[q.id];
+        return Array.isArray(v) ? v.length === 0 : !v;
+      });
+      if (missingRequired) { showToast('Please answer all required questions', 'error'); return; }
+
+      const btn = document.getElementById('submit-btn');
+      const originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Submitting...';
+
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers.Authorization = 'Bearer ' + token;
+        const res = await fetch(`/api/surveys/${surveyId}/responses`, {
+          method: 'POST', headers, body: JSON.stringify({ answers }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (/already submitted/i.test(data.error || '')) {
+            document.getElementById('survey-form').classList.add('hidden');
+            document.getElementById('duplicate-results-link').href = '/survey-results.html?id=' + surveyId;
+            document.getElementById('duplicate-state').classList.remove('hidden');
+            return;
+          }
+          throw new Error(data.error || 'Failed to submit response');
+        }
+        document.getElementById('survey-form').classList.add('hidden');
+        document.getElementById('view-results-link').href = '/survey-results.html?id=' + surveyId;
+        document.getElementById('success-state').classList.remove('hidden');
+      } catch (e) {
+        showToast(e.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    }
+
+    loadSurvey();
+  </script>
+</body>
+</html>

@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create Survey - Alpha One Labs</title>
+  <link rel="icon" type="image/png" href="https://alphaonelabs.com/static/images/logo.png" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: {} } }
+    function initializeDarkMode() {
+      const darkModeEnabled = localStorage.getItem('darkMode') === 'true';
+      if (darkModeEnabled) document.documentElement.classList.add('dark');
+      else if (localStorage.getItem('darkMode') === null) localStorage.setItem('darkMode', 'false');
+    }
+    initializeDarkMode();
+    document.addEventListener('DOMContentLoaded', initializeDarkMode);
+  </script>
+
+  <style>
+    html, body { overflow-x: hidden; box-sizing: border-box; }
+    .dark { color-scheme: dark; }
+    :root { color-scheme: light; }
+
+    .gradient-hero { background: linear-gradient(135deg, #0F766E 0%, #0D9488 50%, #06B6D4 100%); }
+    .gradient-hero.dark { background: linear-gradient(135deg, #134E4A 0%, #0F766E 50%, #164E63 100%); }
+
+    .field-input {
+      width: 100%; padding: 0.625rem 0.875rem; border-radius: 0.75rem;
+      border: 1px solid rgb(209 213 219); font-size: 0.875rem; background: #fff; color: #111827;
+    }
+    .dark .field-input { background: #1f2937; border-color: #374151; color: #f3f4f6; }
+    .field-input:focus { outline: none; box-shadow: 0 0 0 2px rgba(13,148,136,0.4); border-color: #0D9488; }
+
+    .question-card.dragging { opacity: 0.4; }
+    .question-card { transition: transform 0.15s, box-shadow 0.15s; }
+    .drag-handle { cursor: grab; }
+    .drag-handle:active { cursor: grabbing; }
+
+    #toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; display: flex; flex-direction: column; gap: 0.5rem; }
+    .toast { min-width: 260px; max-width: 360px; padding: 0.875rem 1rem; border-radius: 0.75rem; color: #fff; font-size: 0.875rem; box-shadow: 0 10px 25px rgba(0,0,0,0.2); animation: toast-in 0.2s ease; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .toast-success { background: #059669; }
+    .toast-error { background: #DC2626; }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col bg-gray-50 text-gray-900 dark:bg-black dark:text-gray-100 transition-colors duration-300 overflow-x-hidden">
+
+  <div id="site-navbar"></div>
+
+  <section class="gradient-hero text-white py-12 relative overflow-hidden">
+    <div class="relative max-w-4xl mx-auto px-4 md:px-6">
+      <nav class="text-teal-100 text-sm mb-4 flex items-center gap-2">
+        <a href="/surveys.html" class="hover:text-white transition flex items-center gap-1"><i class="fas fa-arrow-left"></i>Surveys</a>
+      </nav>
+      <h1 class="text-3xl md:text-4xl font-extrabold text-white leading-tight mb-2"><i class="fas fa-pen-to-square mr-2"></i>Create a Survey</h1>
+      <p class="text-teal-100">Build a survey with multiple question types. Your draft is saved automatically.</p>
+    </div>
+  </section>
+
+  <main class="flex-1 max-w-4xl mx-auto w-full px-4 md:px-6 py-10 space-y-6">
+
+    <div id="login-warning" class="hidden rounded-2xl p-6 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 flex items-center gap-3">
+      <i class="fas fa-circle-exclamation text-xl"></i>
+      <span>You need to <a href="/login.html" class="underline font-semibold">log in</a> to create a survey. Your draft will be kept.</span>
+    </div>
+
+    <section class="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 p-6 space-y-5">
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Survey Title</label>
+        <input id="survey-title" type="text" maxlength="200" placeholder="e.g. Customer Satisfaction Survey" class="field-input" />
+      </div>
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Description</label>
+        <textarea id="survey-description" rows="3" placeholder="What is this survey about?" class="field-input"></textarea>
+      </div>
+      <div class="flex items-center justify-between rounded-xl bg-gray-50 dark:bg-gray-900/40 px-4 py-3">
+        <div>
+          <p class="font-semibold text-sm text-gray-700 dark:text-gray-300">Public Survey</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">Public surveys appear in the directory and can be taken by anyone.</p>
+        </div>
+        <button type="button" id="public-toggle" onclick="togglePublic()"
+          class="relative inline-flex h-6 w-11 items-center rounded-full bg-teal-600 transition">
+          <span id="public-toggle-knob" class="inline-block h-4 w-4 transform rounded-full bg-white transition translate-x-6"></span>
+        </button>
+      </div>
+    </section>
+
+    <section>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold text-gray-800 dark:text-gray-200">Questions</h2>
+        <span id="question-count-label" class="text-xs text-gray-500 dark:text-gray-400">0 / 50</span>
+      </div>
+
+      <div id="questions-list" class="space-y-4"></div>
+
+      <div id="no-questions" class="text-center text-gray-400 dark:text-gray-500 py-10 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl">
+        <i class="fas fa-list-check text-3xl mb-3 block opacity-50"></i>
+        No questions yet. Add your first question below.
+      </div>
+
+      <button type="button" onclick="addQuestion()"
+        class="mt-4 w-full flex items-center justify-center gap-2 border-2 border-dashed border-teal-300 dark:border-teal-700 text-teal-600 dark:text-teal-400 font-semibold py-3 rounded-xl hover:bg-teal-50 dark:hover:bg-teal-900/20 transition">
+        <i class="fas fa-plus"></i>Add Question
+      </button>
+    </section>
+
+    <div class="flex items-center justify-end gap-3 pb-10">
+      <button type="button" onclick="clearDraft()" class="px-5 py-2.5 rounded-xl text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+        Clear Draft
+      </button>
+      <button type="button" id="submit-btn" onclick="submitSurvey()"
+        class="px-6 py-2.5 rounded-xl text-sm font-bold bg-teal-600 hover:bg-teal-700 text-white shadow-lg hover:shadow-xl transition-all">
+        <i class="fas fa-paper-plane mr-1"></i>Publish Survey
+      </button>
+    </div>
+  </main>
+
+  <div id="site-footer"></div>
+  <div id="toast-container"></div>
+
+  <div id="confirm-modal" class="hidden fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-black/50">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-sm w-full p-6">
+      <div class="flex items-start gap-3 mb-5">
+        <div class="shrink-0 w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600 dark:text-amber-400">
+          <i class="fas fa-triangle-exclamation"></i>
+        </div>
+        <div>
+          <h3 class="font-bold text-gray-800 dark:text-gray-200">Clear draft?</h3>
+          <p id="confirm-modal-message" class="text-sm text-gray-500 dark:text-gray-400 mt-1">This cannot be undone.</p>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2">
+        <button onclick="closeConfirmModal()" class="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">Cancel</button>
+        <button id="confirm-modal-confirm-btn" class="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition">Clear Draft</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/layout.js" defer></script>
+  <script>
+    const token = localStorage.getItem('edu_token');
+    const DRAFT_KEY = 'survey_draft_v1';
+    const QUESTION_TYPES = [
+      { value: 'multiple_choice', label: 'Multiple Choice' },
+      { value: 'checkbox', label: 'Checkbox' },
+      { value: 'text', label: 'Text' },
+      { value: 'true_false', label: 'True / False' },
+      { value: 'scale', label: 'Scale (1-5)' },
+    ];
+
+    function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toast-container');
+      const el = document.createElement('div');
+      el.className = `toast toast-${type}`;
+      el.textContent = message;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+
+    let isPublic = true;
+    let questions = [];
+    let dragIndex = null;
+
+    function newQuestion(type = 'text') {
+      return { _key: 'q' + Math.random().toString(36).slice(2), text: '', type, required: false, options: type === 'multiple_choice' || type === 'checkbox' ? ['', ''] : [] };
+    }
+
+    function togglePublic() {
+      isPublic = !isPublic;
+      const knob = document.getElementById('public-toggle-knob');
+      const btn = document.getElementById('public-toggle');
+      knob.classList.toggle('translate-x-6', isPublic);
+      knob.classList.toggle('translate-x-1', !isPublic);
+      btn.classList.toggle('bg-teal-600', isPublic);
+      btn.classList.toggle('bg-gray-300', !isPublic);
+      saveDraft();
+    }
+
+    function addQuestion() {
+      if (questions.length >= 50) { showToast('Maximum of 50 questions reached', 'error'); return; }
+      questions.push(newQuestion());
+      renderQuestions();
+      saveDraft();
+    }
+
+    function removeQuestion(key) {
+      questions = questions.filter(q => q._key !== key);
+      renderQuestions();
+      saveDraft();
+    }
+
+    function updateQuestion(key, patch) {
+      const q = questions.find(q => q._key === key);
+      if (!q) return;
+      Object.assign(q, patch);
+      saveDraft();
+    }
+
+    function changeQuestionType(key, type) {
+      const q = questions.find(q => q._key === key);
+      if (!q) return;
+      q.type = type;
+      if ((type === 'multiple_choice' || type === 'checkbox') && q.options.length < 2) {
+        q.options = ['', ''];
+      } else if (type !== 'multiple_choice' && type !== 'checkbox') {
+        q.options = [];
+      }
+      renderQuestions();
+      saveDraft();
+    }
+
+    function addOption(key) {
+      const q = questions.find(q => q._key === key);
+      if (!q) return;
+      q.options.push('');
+      renderQuestions();
+      saveDraft();
+    }
+
+    function removeOption(key, idx) {
+      const q = questions.find(q => q._key === key);
+      if (!q || q.options.length <= 2) return;
+      q.options.splice(idx, 1);
+      renderQuestions();
+      saveDraft();
+    }
+
+    function updateOption(key, idx, value) {
+      const q = questions.find(q => q._key === key);
+      if (!q) return;
+      q.options[idx] = value;
+      saveDraft();
+    }
+
+    function questionCardHtml(q, index) {
+      const optionsHtml = (q.type === 'multiple_choice' || q.type === 'checkbox') ? `
+        <div class="space-y-2 mt-3">
+          ${q.options.map((opt, idx) => `
+            <div class="flex items-center gap-2">
+              <i class="fas ${q.type === 'multiple_choice' ? 'fa-circle' : 'fa-square'} text-gray-300 dark:text-gray-600 text-xs"></i>
+              <input type="text" value="${esc(opt)}" placeholder="Option ${idx + 1}"
+                oninput="updateOption('${q._key}', ${idx}, this.value)"
+                class="field-input flex-1 !py-2" />
+              <button type="button" onclick="removeOption('${q._key}', ${idx})" ${q.options.length <= 2 ? 'disabled' : ''}
+                class="text-gray-400 hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed px-2">
+                <i class="fas fa-xmark"></i>
+              </button>
+            </div>`).join('')}
+          <button type="button" onclick="addOption('${q._key}')" class="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:underline mt-1">
+            <i class="fas fa-plus mr-1"></i>Add Option
+          </button>
+        </div>` : (q.type === 'scale' ? `
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2"><i class="fas fa-info-circle mr-1"></i>Respondents choose a value from 1 to 5.</p>` : '');
+
+      return `
+        <div class="question-card bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 p-5"
+             draggable="true" data-key="${q._key}"
+             ondragstart="onDragStart(event, '${q._key}')" ondragover="onDragOver(event)" ondrop="onDrop(event, '${q._key}')" ondragend="onDragEnd(event)">
+          <div class="flex items-start gap-3">
+            <div class="drag-handle text-gray-300 dark:text-gray-600 pt-2.5" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></div>
+            <div class="flex-1 space-y-3">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-teal-600 dark:text-teal-400 shrink-0">Q${index + 1}</span>
+                <input type="text" value="${esc(q.text)}" placeholder="Question text"
+                  oninput="updateQuestion('${q._key}', { text: this.value })" class="field-input flex-1" />
+              </div>
+              <div class="flex flex-wrap items-center gap-3">
+                <select onchange="changeQuestionType('${q._key}', this.value)" class="field-input !w-auto">
+                  ${QUESTION_TYPES.map(t => `<option value="${t.value}" ${t.value === q.type ? 'selected' : ''}>${t.label}</option>`).join('')}
+                </select>
+                <label class="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300 cursor-pointer">
+                  <input type="checkbox" ${q.required ? 'checked' : ''} onchange="updateQuestion('${q._key}', { required: this.checked })" class="rounded text-teal-600 focus:ring-teal-500" />
+                  Required
+                </label>
+              </div>
+              ${optionsHtml}
+            </div>
+            <button type="button" onclick="removeQuestion('${q._key}')" class="text-gray-400 hover:text-red-500 transition pt-2.5" title="Remove question">
+              <i class="fas fa-trash"></i>
+            </button>
+          </div>
+        </div>`;
+    }
+
+    function renderQuestions() {
+      const list = document.getElementById('questions-list');
+      const empty = document.getElementById('no-questions');
+      document.getElementById('question-count-label').textContent = `${questions.length} / 50`;
+      if (!questions.length) {
+        list.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+      list.innerHTML = questions.map(questionCardHtml).join('');
+    }
+
+    // ---- Drag and drop reordering ----
+    function onDragStart(e, key) {
+      dragIndex = questions.findIndex(q => q._key === key);
+      e.currentTarget.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    }
+    function onDragOver(e) { e.preventDefault(); }
+    function onDrop(e, key) {
+      e.preventDefault();
+      const dropIndex = questions.findIndex(q => q._key === key);
+      if (dragIndex === null || dropIndex === -1 || dragIndex === dropIndex) return;
+      const [moved] = questions.splice(dragIndex, 1);
+      questions.splice(dropIndex, 0, moved);
+      dragIndex = null;
+      renderQuestions();
+      saveDraft();
+    }
+    function onDragEnd(e) { e.currentTarget.classList.remove('dragging'); }
+
+    // ---- Draft autosave ----
+    function saveDraft() {
+      const draft = {
+        title: document.getElementById('survey-title').value,
+        description: document.getElementById('survey-description').value,
+        is_public: isPublic,
+        questions,
+      };
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    }
+
+    function loadDraft() {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (!raw) { questions = [newQuestion()]; return; }
+        const draft = JSON.parse(raw);
+        document.getElementById('survey-title').value = draft.title || '';
+        document.getElementById('survey-description').value = draft.description || '';
+        isPublic = draft.is_public !== false;
+        questions = (draft.questions && draft.questions.length) ? draft.questions : [newQuestion()];
+        const knob = document.getElementById('public-toggle-knob');
+        const btn = document.getElementById('public-toggle');
+        knob.classList.toggle('translate-x-6', isPublic);
+        knob.classList.toggle('translate-x-1', !isPublic);
+        btn.classList.toggle('bg-teal-600', isPublic);
+        btn.classList.toggle('bg-gray-300', !isPublic);
+      } catch (e) {
+        questions = [newQuestion()];
+      }
+    }
+
+    let _confirmCallback = null;
+
+    function showConfirmModal(message, onConfirm) {
+      document.getElementById('confirm-modal-message').textContent = message;
+      _confirmCallback = onConfirm;
+      document.getElementById('confirm-modal').classList.remove('hidden');
+    }
+
+    function closeConfirmModal() {
+      document.getElementById('confirm-modal').classList.add('hidden');
+      _confirmCallback = null;
+    }
+
+    document.getElementById('confirm-modal-confirm-btn').addEventListener('click', () => {
+      const cb = _confirmCallback;
+      closeConfirmModal();
+      if (cb) cb();
+    });
+
+    function clearDraft() {
+      showConfirmModal('Clear the current draft? This cannot be undone.', () => {
+        localStorage.removeItem(DRAFT_KEY);
+        document.getElementById('survey-title').value = '';
+        document.getElementById('survey-description').value = '';
+        isPublic = true;
+        questions = [newQuestion()];
+        renderQuestions();
+        showToast('Draft cleared', 'success');
+      });
+    }
+
+    document.getElementById('survey-title').addEventListener('input', saveDraft);
+    document.getElementById('survey-description').addEventListener('input', saveDraft);
+
+    // ---- Submit ----
+    function validateClientSide(title, qs) {
+      if (!title.trim()) return 'Title is required';
+      if (!qs.length) return 'At least 1 question is required';
+      if (qs.length > 50) return 'A survey may have at most 50 questions';
+      for (let i = 0; i < qs.length; i++) {
+        const q = qs[i];
+        if (!q.text.trim()) return `Question ${i + 1} is missing text`;
+        if ((q.type === 'multiple_choice' || q.type === 'checkbox')) {
+          const filled = q.options.map(o => o.trim()).filter(Boolean);
+          if (filled.length < 2) return `Question ${i + 1} needs at least 2 options`;
+        }
+      }
+      return null;
+    }
+
+    async function submitSurvey() {
+      if (!token) { window.location.href = '/login.html'; return; }
+
+      const title = document.getElementById('survey-title').value;
+      const description = document.getElementById('survey-description').value;
+      const validationError = validateClientSide(title, questions);
+      if (validationError) { showToast(validationError, 'error'); return; }
+
+      const payload = {
+        title: title.trim(),
+        description: description.trim(),
+        is_public: isPublic,
+        questions: questions.map(q => ({
+          text: q.text.trim(),
+          type: q.type,
+          required: !!q.required,
+          options: (q.options || []).map(o => o.trim()).filter(Boolean),
+        })),
+      };
+
+      const btn = document.getElementById('submit-btn');
+      const originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Publishing...';
+
+      try {
+        const res = await fetch('/api/surveys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to create survey');
+
+        localStorage.removeItem(DRAFT_KEY);
+        showToast('Survey published!', 'success');
+        setTimeout(() => { window.location.href = '/surveys.html'; }, 700);
+      } catch (e) {
+        showToast(e.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    }
+
+    if (!token) document.getElementById('login-warning').classList.remove('hidden');
+    loadDraft();
+    renderQuestions();
+  </script>
+</body>
+</html>
