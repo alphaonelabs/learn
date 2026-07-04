@@ -35,7 +35,7 @@ CHECKBOX_SEP = "␟"
 
 # Characters that Excel/Sheets treat as formula triggers when a cell value
 # starts with them (CSV/formula injection, CWE-1236).
-_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ def ok(data=None, msg: str = "OK"):
     return json_resp(body, 200)
 
 
-def err(msg: str, status: int = 400, code: str = None):
+def err(msg: str, status: int = 400, code: str | None = None):
     body = {"error": msg}
     if code:
         body["code"] = code

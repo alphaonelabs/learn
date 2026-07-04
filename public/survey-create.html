@@ -126,7 +126,7 @@
   </main>
 
   <div id="site-footer"></div>
-  <div id="toast-container"></div>
+   <div id="toast-container" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <div
     id="confirm-modal"
@@ -151,9 +151,6 @@
       </div>
     </div>
   </div>
-
-  <div id="site-footer"></div>
-  <div id="toast-container" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script src="/js/layout.js" defer></script>
   <script>
@@ -187,15 +184,24 @@
     }
 
     function togglePublic() {
-      isPublic = !isPublic;
-      const knob = document.getElementById('public-toggle-knob');
-      const btn = document.getElementById('public-toggle');
-      knob.classList.toggle('translate-x-6', isPublic);
-      knob.classList.toggle('translate-x-1', !isPublic);
-      btn.classList.toggle('bg-teal-600', isPublic);
-      btn.classList.toggle('bg-gray-300', !isPublic);
-      saveDraft();
-    }
+    isPublic = !isPublic;
+    syncPublicToggle();
+    saveDraft();
+  }
+
+    function syncPublicToggle() {
+    const knob = document.getElementById('public-toggle-knob');
+    const btn = document.getElementById('public-toggle');
+     knob.classList.toggle('translate-x-6', isPublic);
+     knob.classList.toggle('translate-x-1', !isPublic);
+    btn.classList.toggle('bg-teal-600', isPublic);
+    btn.classList.toggle('bg-gray-300', !isPublic);
+    btn.setAttribute('aria-checked', String(isPublic));
+    btn.setAttribute(
+    'aria-label',
+    `Survey visibility: ${isPublic ? 'public' : 'private'}`
+    );
+   }
 
     function addQuestion() {
       if (questions.length >= 50) { showToast('Maximum of 50 questions reached', 'error'); return; }
@@ -365,12 +371,7 @@
         document.getElementById('survey-description').value = draft.description || '';
         isPublic = draft.is_public !== false;
         questions = (draft.questions && draft.questions.length) ? draft.questions : [newQuestion()];
-        const knob = document.getElementById('public-toggle-knob');
-        const btn = document.getElementById('public-toggle');
-        knob.classList.toggle('translate-x-6', isPublic);
-        knob.classList.toggle('translate-x-1', !isPublic);
-        btn.classList.toggle('bg-teal-600', isPublic);
-        btn.classList.toggle('bg-gray-300', !isPublic);
+       syncPublicToggle();
       } catch (e) {
         questions = [newQuestion()];
       }

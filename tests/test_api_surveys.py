@@ -53,6 +53,26 @@ def _basic_survey_payload(qtype="text"):
 
 
 # ---------------------------------------------------------------------------
+# Local helper: MockDB variant that supports D1's batch() API.
+#
+# ``delete_survey()`` in src/surveys.py issues its cascading deletes via
+# ``env.DB.batch([...])`` (a real method on Cloudflare's D1 binding) so the
+# whole cascade commits atomically. The shared ``MockDB`` in tests/helpers.py
+# intentionally only stubs the primitives the rest of the suite relies on
+# (``prepare``/``bind``/``run``/``first``/``all``), so rather than widen that
+# shared double for every test in the project, we extend it locally here,
+# scoped to just the survey-deletion test that needs it.
+# ---------------------------------------------------------------------------
+
+class BatchMockDB(MockDB):
+    async def batch(self, statements):
+        results = []
+        for stmt in statements:
+            results.append(await stmt.run())
+        return results
+
+
+# ---------------------------------------------------------------------------
 # api_create_survey()
 # ---------------------------------------------------------------------------
 
@@ -542,7 +562,9 @@ class TestApiDeleteSurvey:
 
     async def test_owner_can_delete(self):
         token = _token(uid="user-1")
-        env = make_env(db=MockDB([make_stmt(first=MockRow(user_id="user-1"))]))
+        # delete_survey() runs its cascade via env.DB.batch([...]); use the
+        # local batch-aware MockDB subclass so that call has something to hit.
+        env = make_env(db=BatchMockDB([make_stmt(first=MockRow(user_id="user-1"))]))
         r = await worker.api_delete_survey("s1", _delete_req("/api/surveys/s1", token), env)
         assert r.status == 200
         assert _parse(r)["success"] is True
