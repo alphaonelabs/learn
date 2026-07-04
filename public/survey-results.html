@@ -201,10 +201,10 @@
       if (q.type === 'multiple_choice' || q.type === 'checkbox' || q.type === 'true_false') {
         body = `
           <div class="flex items-center justify-end gap-1 mb-3">
-            <button data-chart-toggle="${q.id}" data-type="pie" onclick="toggleChartType('${q.id}','pie')" class="chart-toggle-btn active px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+            <button data-chart-toggle="${q.id}" data-type="pie" onclick="toggleChartType('${q.id}','pie')" aria-pressed="true" class="chart-toggle-btn active px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
               <i class="fas fa-chart-pie mr-1"></i>Pie
             </button>
-            <button data-chart-toggle="${q.id}" data-type="bar" onclick="toggleChartType('${q.id}','bar')" class="chart-toggle-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+            <button data-chart-toggle="${q.id}" data-type="bar" onclick="toggleChartType('${q.id}','bar')" aria-pressed="false" class="chart-toggle-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
               <i class="fas fa-chart-bar mr-1"></i>Bar
             </button>
           </div>

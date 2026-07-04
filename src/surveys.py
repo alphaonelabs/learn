@@ -33,6 +33,10 @@ MAX_TITLE_LEN = 200
 # ``survey_answers.answer_text`` column.
 CHECKBOX_SEP = "␟"
 
+# Characters that Excel/Sheets treat as formula triggers when a cell value
+# starts with them (CSV/formula injection, CWE-1236).
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
 
 # ---------------------------------------------------------------------------
 # Shared low-level helpers (duplicated from worker.py — see module docstring)
@@ -68,18 +72,24 @@ def verify_token(raw: str, secret: str):
         return None
 
 
-_CORS = {
+# Public name so other modules (e.g. src/api/surveys.py) can build custom
+# Response objects with the correct CORS headers without reaching into a
+# leading-underscore "private" constant.
+CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
 }
+# Kept as an alias for backwards compatibility with any existing internal
+# references within this module.
+_CORS = CORS_HEADERS
 
 
 def json_resp(data, status: int = 200):
     return Response(
         json.dumps(data),
         status=status,
-        headers={"Content-Type": "application/json", **_CORS},
+        headers={"Content-Type": "application/json", **CORS_HEADERS},
     )
 
 
@@ -90,8 +100,11 @@ def ok(data=None, msg: str = "OK"):
     return json_resp(body, 200)
 
 
-def err(msg: str, status: int = 400):
-    return json_resp({"error": msg}, status)
+def err(msg: str, status: int = 400, code: str = None):
+    body = {"error": msg}
+    if code:
+        body["code"] = code
+    return json_resp(body, status)
 
 
 async def parse_json_object(req):
@@ -335,6 +348,9 @@ async def submit_response(env, survey_id: str, user_id, answers: dict):
     questions.
 
     Returns ``(response_id, None)`` on success or ``(None, error_message)``.
+    For a duplicate submission, ``error_message`` is the stable machine
+    code ``"already_submitted"`` rather than free-form text, so callers can
+    branch on it instead of pattern-matching a human-readable sentence.
     """
     survey = await env.DB.prepare(
         "SELECT id, is_public, user_id FROM surveys WHERE id = ?"
@@ -363,7 +379,7 @@ async def submit_response(env, survey_id: str, user_id, answers: dict):
             "SELECT id FROM survey_responses WHERE survey_id = ? AND user_id = ?"
         ).bind(survey_id, user_id).first()
         if existing:
-            return None, "You have already submitted a response to this survey"
+            return None, "already_submitted"
 
     cleaned_answers = []  # list of (question_id, answer_text)
     for q in questions:
@@ -552,27 +568,28 @@ async def delete_survey(env, survey_id: str, user_id: str):
     if survey.user_id != user_id:
         return False, "Only the survey creator can delete this survey"
 
-    await env.DB.prepare(
-        "DELETE FROM survey_answers WHERE question_id IN "
-        "(SELECT id FROM survey_questions WHERE survey_id = ?)"
-    ).bind(survey_id).run()
-
-    await env.DB.prepare(
-        "DELETE FROM survey_responses WHERE survey_id = ?"
-    ).bind(survey_id).run()
-
-    await env.DB.prepare(
-        "DELETE FROM survey_options WHERE question_id IN "
-        "(SELECT id FROM survey_questions WHERE survey_id = ?)"
-    ).bind(survey_id).run()
-
-    await env.DB.prepare(
-        "DELETE FROM survey_questions WHERE survey_id = ?"
-    ).bind(survey_id).run()
-
-    await env.DB.prepare(
-        "DELETE FROM surveys WHERE id = ?"
-    ).bind(survey_id).run()
+    # Run the full cascade as a single atomic batch so a mid-cascade failure
+    # can't leave orphaned rows behind.
+    statements = [
+        env.DB.prepare(
+            "DELETE FROM survey_answers WHERE question_id IN "
+            "(SELECT id FROM survey_questions WHERE survey_id = ?)"
+        ).bind(survey_id),
+        env.DB.prepare(
+            "DELETE FROM survey_responses WHERE survey_id = ?"
+        ).bind(survey_id),
+        env.DB.prepare(
+            "DELETE FROM survey_options WHERE question_id IN "
+            "(SELECT id FROM survey_questions WHERE survey_id = ?)"
+        ).bind(survey_id),
+        env.DB.prepare(
+            "DELETE FROM survey_questions WHERE survey_id = ?"
+        ).bind(survey_id),
+        env.DB.prepare(
+            "DELETE FROM surveys WHERE id = ?"
+        ).bind(survey_id),
+    ]
+    await env.DB.batch(statements)
 
     return True, None
 
@@ -580,6 +597,19 @@ async def delete_survey(env, survey_id: str, user_id: str):
 # ---------------------------------------------------------------------------
 # Export CSV
 # ---------------------------------------------------------------------------
+
+def _csv_safe(value) -> str:
+    """Neutralize CSV/formula injection (CWE-1236).
+
+    Prefixes values that start with a formula-trigger character with a
+    single quote so spreadsheet apps (Excel/Sheets) render them as literal
+    text instead of executing them as a formula.
+    """
+    s = "" if value is None else str(value)
+    if s.startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + s
+    return s
+
 
 async def export_csv(env, survey_id: str, viewer_id):
     survey = await env.DB.prepare(
@@ -617,8 +647,8 @@ async def export_csv(env, survey_id: str, viewer_id):
     for r in responses:
         row_answers = answers_by_response.get(r.id, {})
         writer.writerow(
-            [r.id, r.username or "Anonymous", r.submitted_at]
-            + [row_answers.get(q.id, "") for q in questions]
+            [r.id, _csv_safe(r.username or "Anonymous"), r.submitted_at]
+            + [_csv_safe(row_answers.get(q.id, "")) for q in questions]
         )
 
     return buf.getvalue(), None

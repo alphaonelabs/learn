@@ -64,6 +64,12 @@ async def api_submit_survey_response(survey_id, req, env):
         env, survey_id, user["id"] if user else None, answers
     )
     if error:
+        if error == "already_submitted":
+            return core.err(
+                "You have already submitted a response to this survey",
+                400,
+                code="already_submitted",
+            )
         status = 404 if error == "Survey not found" else 400
         return core.err(error, status)
 
@@ -104,6 +110,6 @@ async def api_export_survey(survey_id, req, env):
         headers={
             "Content-Type": "text/csv",
             "Content-Disposition": f'attachment; filename="survey-{survey_id}-export.csv"',
-            **core._CORS,
+            **core.CORS_HEADERS,
         },
     )

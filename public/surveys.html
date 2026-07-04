@@ -55,8 +55,8 @@
       <div class="flex items-center gap-3">
         <div class="relative">
           <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
-          <input id="search" type="text" placeholder="Search surveys…"
-            class="pl-9 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-teal-300 dark:focus:ring-teal-700" />
+          <input id="search" type="text" placeholder="Search surveys…" aria-label="Search surveys"
+           class="pl-9 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-teal-300 dark:focus:ring-teal-700" />
         </div>
         <a href="/survey-create.html"
           class="bg-teal-600 hover:bg-teal-700 text-white font-semibold px-4 py-2 rounded-lg flex items-center whitespace-nowrap">
@@ -73,6 +73,13 @@
 
     <div id="survey-list-container" class="hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
       <ul id="survey-list" class="divide-y divide-gray-200 dark:divide-gray-700"></ul>
+    </div>
+
+    <div class="flex justify-center mt-4">
+      <button id="load-more-btn" onclick="loadSurveys(false)"
+        class="hidden px-5 py-2.5 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold text-sm transition">
+        Load more
+      </button>
     </div>
 
     <div id="empty-state" class="hidden text-center text-gray-400 dark:text-gray-500 py-20 border border-gray-200 dark:border-gray-700 rounded-lg">
@@ -92,7 +99,13 @@
   <div id="site-footer"></div>
   <div id="toast-container"></div>
 
-  <div id="confirm-modal" class="hidden fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-black/50">
+ <div
+  id="confirm-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="confirm-modal-title"
+  aria-describedby="confirm-modal-message"
+  class="hidden fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-black/50">
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-sm w-full p-6">
       <div class="flex items-start gap-3 mb-5">
         <div class="shrink-0 w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600 dark:text-red-400">
@@ -104,8 +117,8 @@
         </div>
       </div>
       <div class="flex justify-end gap-2">
-        <button onclick="closeConfirmModal()" class="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">Cancel</button>
-        <button id="confirm-modal-confirm-btn" class="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition">Delete</button>
+        <button type="button" onclick="closeConfirmModal()" class="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">Cancel</button>
+        <button type="button" id="confirm-modal-confirm-btn" class="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition">Delete</button>
       </div>
     </div>
   </div>
@@ -126,7 +139,12 @@
       setTimeout(() => el.remove(), 3500);
     }
 
+    const PAGE_SIZE = 50;
     let allSurveys = [];
+    let currentOffset = 0;
+    let currentQuery = '';
+    let hasMore = false;
+    let searchDebounceTimer = null;
 
     function renderRow(s) {
       return `
@@ -166,30 +184,37 @@
     }
 
     function renderList() {
-      const q = document.getElementById('search').value.trim().toLowerCase();
-      const filtered = q
-        ? allSurveys.filter(s => s.title.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q))
-        : allSurveys;
-
       const container = document.getElementById('survey-list-container');
       const empty = document.getElementById('empty-state');
-      if (!filtered.length) {
+      if (!allSurveys.length) {
         container.classList.add('hidden');
         empty.classList.remove('hidden');
       } else {
         empty.classList.add('hidden');
         container.classList.remove('hidden');
-        document.getElementById('survey-list').innerHTML = filtered.map(renderRow).join('');
+        document.getElementById('survey-list').innerHTML = allSurveys.map(renderRow).join('');
       }
+      document.getElementById('load-more-btn').classList.toggle('hidden', !hasMore);
     }
 
-    async function loadSurveys() {
+    async function loadSurveys(reset = true) {
       try {
+        if (reset) {
+          currentOffset = 0;
+          allSurveys = [];
+          document.getElementById('error-state').classList.add('hidden');
+          document.getElementById('empty-state').classList.add('hidden');
+          document.getElementById('skeleton').classList.remove('hidden');
+        }
         const headers = token ? { Authorization: 'Bearer ' + token } : {};
-        const res = await fetch('/api/surveys?limit=50', { headers });
+        const qParam = currentQuery ? `&q=${encodeURIComponent(currentQuery)}` : '';
+        const res = await fetch(`/api/surveys?limit=${PAGE_SIZE}&offset=${currentOffset}${qParam}`, { headers });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to load surveys');
-        allSurveys = data.surveys || [];
+        const newSurveys = data.surveys || [];
+        allSurveys = reset ? newSurveys : allSurveys.concat(newSurveys);
+        hasMore = newSurveys.length === PAGE_SIZE;
+        currentOffset += newSurveys.length;
         document.getElementById('skeleton').classList.add('hidden');
         renderList();
       } catch (e) {
@@ -236,9 +261,16 @@
       });
     }
 
-    document.getElementById('search').addEventListener('input', renderList);
+    document.getElementById('search').addEventListener('input', (e) => {
+      clearTimeout(searchDebounceTimer);
+      const value = e.target.value.trim();
+      searchDebounceTimer = setTimeout(() => {
+        currentQuery = value;
+        loadSurveys(true);
+      }, 300);
+    });
 
-    loadSurveys();
+    loadSurveys(true);
   </script>
 </body>
 </html>
