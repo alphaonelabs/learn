@@ -93,15 +93,15 @@ async def _list_groups(request, env, helpers):
         "       a.created_at,"
         "       a.updated_at,"
         "       COUNT(m.id) AS member_count,"
-        "       CASE WHEN EXISTS(SELECT 1 FROM study_group_members sm2"
-        "                        WHERE sm2.activity_id=a.id AND sm2.user_id=?)"
+        "       CASE WHEN EXISTS(SELECT 1 FROM activity_members am2"
+        "                        WHERE am2.activity_id=a.id AND am2.user_id=?)"
         "            THEN 1 ELSE 0 END AS is_member,"
         "       CASE WHEN a.host_id=? THEN 1 ELSE 0 END AS is_creator"
         "  FROM activities a"
-        "  LEFT JOIN study_group_members m ON m.activity_id=a.id"
+        "  LEFT JOIN activity_members m ON m.activity_id=a.id"
         " WHERE a.type='study_group'"
-        "   AND (a.is_private=0 OR EXISTS(SELECT 1 FROM study_group_members sm"
-        "                                 WHERE sm.activity_id=a.id AND sm.user_id=?))"
+        "   AND (a.is_private=0 OR EXISTS(SELECT 1 FROM activity_members am"
+        "                                 WHERE am.activity_id=a.id AND am.user_id=?))"
     )
     bind_args = [user["id"], user["id"], user["id"]]
     if activity_id:
@@ -186,7 +186,7 @@ async def _create_group(request, env, helpers):
 
         # Insert creator membership row keyed by the activity (group) id.
         stmt_member = env.DB.prepare(
-            "INSERT INTO study_group_members (id,activity_id,user_id,role) VALUES (?,?,?,?)"
+            "INSERT INTO activity_members (id,activity_id,user_id,role) VALUES (?,?,?,?)"
         ).bind(member_id, group_id, user["id"], "creator")
 
         await _run_batch(env, [stmt_activity, stmt_member])
@@ -205,7 +205,7 @@ async def _create_group(request, env, helpers):
         "       a.is_private,"
         "       a.created_at,"
         "       a.updated_at,"
-        "       (SELECT COUNT(*) FROM study_group_members sm WHERE sm.activity_id=a.id) AS member_count"
+        "       (SELECT COUNT(*) FROM activity_members am WHERE am.activity_id=a.id) AS member_count"
         "  FROM activities a WHERE a.id=? AND a.type='study_group'"
     ).bind(group_id).first()
 
@@ -255,18 +255,18 @@ async def _group_detail(group_id: str, request, env, helpers):
         return helpers["err"]("Study group not found", 404)
 
     membership = await env.DB.prepare(
-        "SELECT role FROM study_group_members WHERE activity_id=? AND user_id=?"
+        "SELECT role FROM activity_members WHERE activity_id=? AND user_id=?"
     ).bind(group_id, user["id"]).first()
 
     if group.is_private and not membership:
         return helpers["err"]("Forbidden", 403)
 
     rows = await env.DB.prepare(
-        "SELECT sm.user_id,sm.role,sm.joined_at,u.username AS username_enc"
-        " FROM study_group_members sm"
-        " JOIN users u ON u.id=sm.user_id"
-        " WHERE sm.activity_id=?"
-        " ORDER BY sm.joined_at ASC"
+        "SELECT am.user_id,am.role,am.joined_at,u.username AS username_enc"
+        " FROM activity_members am"
+        " JOIN users u ON u.id=am.user_id"
+        " WHERE am.activity_id=?"
+        " ORDER BY am.joined_at ASC"
     ).bind(group_id).all()
 
     members = []
@@ -392,7 +392,7 @@ async def _leave_group(group_id: str, request, env, helpers):
         return helpers["err"]("Study group not found", 404)
 
     membership = await env.DB.prepare(
-        "SELECT id FROM study_group_members WHERE activity_id=? AND user_id=?"
+        "SELECT id FROM activity_members WHERE activity_id=? AND user_id=?"
     ).bind(group_id, user["id"]).first()
     if not membership:
         return helpers["err"]("You are not a member of this group", 400)
@@ -401,7 +401,7 @@ async def _leave_group(group_id: str, request, env, helpers):
         return helpers["err"]("Group creator cannot leave the group", 400)
 
     await env.DB.prepare(
-        "DELETE FROM study_group_members WHERE activity_id=? AND user_id=?"
+        "DELETE FROM activity_members WHERE activity_id=? AND user_id=?"
     ).bind(group_id, user["id"]).run()
 
     return helpers["ok"](None, "Left study group")
@@ -419,7 +419,7 @@ async def _invite_member(group_id: str, request, env, helpers):
         return helpers["err"]("Study group not found", 404)
 
     inviter_membership = await env.DB.prepare(
-        "SELECT id FROM study_group_members WHERE activity_id=? AND user_id=?"
+        "SELECT id FROM activity_members WHERE activity_id=? AND user_id=?"
     ).bind(group_id, user["id"]).first()
     if not inviter_membership:
         return helpers["err"]("Only group members can send invitations", 403)
@@ -444,7 +444,7 @@ async def _invite_member(group_id: str, request, env, helpers):
         return helpers["err"]("You cannot invite yourself", 400)
 
     already_member = await env.DB.prepare(
-        "SELECT id FROM study_group_members WHERE activity_id=? AND user_id=?"
+        "SELECT id FROM activity_members WHERE activity_id=? AND user_id=?"
     ).bind(group_id, invitee.id).first()
     if already_member:
         return helpers["err"]("User is already a member of this group", 400)
@@ -506,7 +506,7 @@ async def _list_invitations(request, env, helpers):
     rows = await env.DB.prepare(
         "SELECT i.id,i.activity_id,i.inviter_id,i.status,i.created_at,a.title AS group_name,"
         "       u.username AS inviter_username_enc"
-        "  FROM study_group_invites i"
+        "  FROM activity_invites i"
         "  JOIN activities a ON a.id=i.activity_id AND a.type='study_group'"
         "  JOIN users u ON u.id=i.inviter_id"
         " WHERE i.invitee_id=? AND i.status='pending'"
@@ -544,7 +544,7 @@ async def _respond_invitation(invite_id: str, request, env, helpers):
     invite = await env.DB.prepare(
         "SELECT i.id,i.activity_id,i.inviter_id,i.invitee_id,i.status,"
         "       a.title AS group_name,a.max_members"
-        "  FROM study_group_invites i"
+        "  FROM activity_invites i"
         "  JOIN activities a ON a.id=i.activity_id AND a.type='study_group'"
         " WHERE i.id=?"
     ).bind(invite_id).first()
@@ -560,7 +560,7 @@ async def _respond_invitation(invite_id: str, request, env, helpers):
 
     if action == "accept":
         existing = await env.DB.prepare(
-            "SELECT id FROM study_group_members WHERE activity_id=? AND user_id=?"
+            "SELECT id FROM activity_members WHERE activity_id=? AND user_id=?"
         ).bind(invite.activity_id, user["id"]).first()
         if existing:
             return helpers["err"]("You are already a member of this group", 400)
@@ -569,7 +569,7 @@ async def _respond_invitation(invite_id: str, request, env, helpers):
         # group is below max_members to avoid races with concurrent accepts.
         try:
             await env.DB.prepare(
-                "INSERT INTO study_group_members (id,activity_id,user_id,role)"
+                "INSERT INTO activity_members (id,activity_id,user_id,role)"
                 " SELECT ?, ?, ?, 'member'"
                 " WHERE (SELECT COUNT(*) FROM study_group_members WHERE activity_id=?)"
                 "       < COALESCE((SELECT max_members FROM activities WHERE id=?), 1000000000)"
@@ -580,13 +580,13 @@ async def _respond_invitation(invite_id: str, request, env, helpers):
             return helpers["err"]("Failed to accept invitation", 500)
 
         joined = await env.DB.prepare(
-            "SELECT id FROM study_group_members WHERE activity_id=? AND user_id=?"
+            "SELECT id FROM activity_members WHERE activity_id=? AND user_id=?"
         ).bind(invite.activity_id, user["id"]).first()
         if not joined:
             return helpers["err"]("This group is full", 400)
 
         stmt_update = env.DB.prepare(
-            "UPDATE study_group_invites SET status='accepted', updated_at=datetime('now') WHERE id=?"
+            "UPDATE activity_invites SET status='accepted', updated_at=datetime('now') WHERE id=?"
         ).bind(invite_id)
 
         try:
@@ -605,7 +605,7 @@ async def _respond_invitation(invite_id: str, request, env, helpers):
         return helpers["ok"](None, "Invitation accepted")
 
     await env.DB.prepare(
-        "UPDATE study_group_invites SET status='declined', updated_at=datetime('now') WHERE id=?"
+        "UPDATE activity_invites SET status='declined', updated_at=datetime('now') WHERE id=?"
     ).bind(invite_id).run()
 
     await _notify(
@@ -647,7 +647,7 @@ async def _activity_groups(activity_id: str, request, env, helpers):
         "       a.updated_at,"
         "       COUNT(m.id) AS member_count"
         "  FROM activities a"
-        "  LEFT JOIN study_group_members m ON m.activity_id=a.id"
+        "  LEFT JOIN activity_members m ON m.activity_id=a.id"
         " WHERE a.id=? AND a.type='study_group' AND a.is_private=0"
         " GROUP BY a.id"
         " ORDER BY a.created_at DESC"

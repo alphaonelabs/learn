@@ -958,8 +958,8 @@ _DDL = [
     "CREATE INDEX IF NOT EXISTS idx_sa_session           ON session_attendance(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_sa_user              ON session_attendance(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_at_activity          ON activity_tags(activity_id)",
-    # Study group memberships & invites (keyed by activities.id for type='study_group')
-    """CREATE TABLE IF NOT EXISTS study_group_members (
+    # Activity memberships & invites (keyed by activities.id)
+    """CREATE TABLE IF NOT EXISTS activity_members (
         id          TEXT PRIMARY KEY,
         activity_id TEXT NOT NULL,
         user_id     TEXT NOT NULL,
@@ -970,7 +970,7 @@ _DDL = [
         FOREIGN KEY (user_id)     REFERENCES users(id)     ON DELETE CASCADE,
         CHECK (role IN ('creator','member'))
     )""",
-    """CREATE TABLE IF NOT EXISTS study_group_invites (
+    """CREATE TABLE IF NOT EXISTS activity_invites (
         id          TEXT PRIMARY KEY,
         activity_id TEXT NOT NULL,
         inviter_id  TEXT NOT NULL,
@@ -984,10 +984,10 @@ _DDL = [
         FOREIGN KEY (invitee_id)  REFERENCES users(id)     ON DELETE CASCADE,
         CHECK (status IN ('pending','accepted','declined'))
     )""",
-    "CREATE INDEX IF NOT EXISTS idx_sgm_activity        ON study_group_members(activity_id)",
-    "CREATE INDEX IF NOT EXISTS idx_sgm_user            ON study_group_members(user_id)",
-    "CREATE INDEX IF NOT EXISTS idx_sgi_activity        ON study_group_invites(activity_id)",
-    "CREATE INDEX IF NOT EXISTS idx_sgi_invitee_status  ON study_group_invites(invitee_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_activity_members_activity_id        ON activity_members(activity_id)",
+    "CREATE INDEX IF NOT EXISTS idx_activity_members_user_id            ON activity_members(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_activity_invites_activity_id        ON activity_invites(activity_id)",
+    "CREATE INDEX IF NOT EXISTS idx_activity_invites_invitee_status     ON activity_invites(invitee_id, status)",
     # Notifications
     """CREATE TABLE IF NOT EXISTS notifications (
         id         TEXT PRIMARY KEY,
