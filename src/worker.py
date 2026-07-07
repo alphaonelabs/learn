@@ -34,11 +34,14 @@ Static HTML pages (public/) are served via Workers Sites (KV binding).
 
 import base64
 import datetime
+import importlib.util
 import hashlib
 import hmac as _hmac
+import importlib
 import json
 import os
 import re
+import sys
 import traceback
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
@@ -884,7 +887,7 @@ _DDL = [
         email_verified INTEGER NOT NULL DEFAULT 0,
         created_at     TEXT NOT NULL DEFAULT (datetime('now'))
     )""",
-    # Activities
+    # Activities (including study groups via type='study_group')
     """CREATE TABLE IF NOT EXISTS activities (
         id            TEXT PRIMARY KEY,
         title         TEXT NOT NULL,
@@ -892,8 +895,11 @@ _DDL = [
         type          TEXT NOT NULL DEFAULT 'course',
         format        TEXT NOT NULL DEFAULT 'self_paced',
         schedule_type TEXT NOT NULL DEFAULT 'ongoing',
+        max_members   INTEGER,
+        is_private    INTEGER NOT NULL DEFAULT 0,
         host_id       TEXT NOT NULL,
         created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at    TEXT,
         FOREIGN KEY (host_id) REFERENCES users(id)
     )""",
     # Sessions
@@ -952,6 +958,34 @@ _DDL = [
     "CREATE INDEX IF NOT EXISTS idx_sa_session           ON session_attendance(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_sa_user              ON session_attendance(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_at_activity          ON activity_tags(activity_id)",
+    # Study group memberships & invites (keyed by activities.id for type='study_group')
+    """CREATE TABLE IF NOT EXISTS study_group_members (
+        id          TEXT PRIMARY KEY,
+        activity_id TEXT NOT NULL,
+        user_id     TEXT NOT NULL,
+        role        TEXT NOT NULL DEFAULT 'member',
+        joined_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (activity_id, user_id),
+        FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id)     REFERENCES users(id)     ON DELETE CASCADE
+    )""",
+    """CREATE TABLE IF NOT EXISTS study_group_invites (
+        id          TEXT PRIMARY KEY,
+        activity_id TEXT NOT NULL,
+        inviter_id  TEXT NOT NULL,
+        invitee_id  TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'pending',
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (activity_id, invitee_id),
+        FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+        FOREIGN KEY (inviter_id)  REFERENCES users(id)     ON DELETE CASCADE,
+        FOREIGN KEY (invitee_id)  REFERENCES users(id)     ON DELETE CASCADE
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_sgm_activity        ON study_group_members(activity_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sgm_user            ON study_group_members(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sgi_activity        ON study_group_invites(activity_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sgi_invitee_status  ON study_group_invites(invitee_id, status)",
     # Notifications
     """CREATE TABLE IF NOT EXISTS notifications (
         id         TEXT PRIMARY KEY,
@@ -6164,6 +6198,29 @@ async def _dispatch(request, env):
             return err("Failed to connect to presence channel", 500)
 
     if path.startswith("/api/"):
+        if (
+            path.startswith("/api/study-groups")
+            or path.startswith("/api/invitations")
+            or re.fullmatch(r"/api/activities/[A-Za-z0-9_-]+/groups", path)
+        ):
+            study_groups_api = _get_study_groups_module()
+            return await study_groups_api.handle(
+                request,
+                env,
+                path,
+                method,
+                {
+                    "verify_token": verify_token,
+                    "parse_json_object": parse_json_object,
+                    "ok": ok,
+                    "err": err,
+                    "new_id": new_id,
+                    "_create_notification": _create_notification,
+                    "blind_index": blind_index,
+                    "decrypt_aes": decrypt_aes,
+                },
+            )
+
         if path == "/api/init" and method == "POST":
             try:
                 await init_db(env)
@@ -6312,6 +6369,27 @@ async def on_fetch(request, env):
         if urlparse(request.url).path.startswith("/api/"):
             return err("Internal server error", 500)
         return await render_500(request, env)
+
+
+def _get_study_groups_module():
+    cached = sys.modules.get("study_groups") or sys.modules.get("src.study_groups")
+    if cached is not None:
+        return cached
+
+    try:
+        mod = importlib.import_module("study_groups")
+    except Exception:
+        try:
+            mod = importlib.import_module("src.study_groups")
+        except Exception:
+            spec = importlib.util.spec_from_file_location(
+                "study_groups", os.path.join(os.path.dirname(__file__), "study_groups.py")
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+
+    sys.modules.setdefault("study_groups", mod)
+    return mod
 
 
 # ---------------------------------------------------------------------------

@@ -18,17 +18,20 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- ACTIVITIES (courses, meetups, workshops, seminars, etc.)
+-- ACTIVITIES (courses, meetups, workshops, seminars, study groups, etc.)
 -- description is encrypted at rest.
 CREATE TABLE IF NOT EXISTS activities (
     id            TEXT PRIMARY KEY,
     title         TEXT NOT NULL,
     description   TEXT,                   -- encrypted
-    type          TEXT NOT NULL DEFAULT 'course',      -- course | meetup | workshop | seminar | other
+    type          TEXT NOT NULL DEFAULT 'course',      -- course | meetup | workshop | seminar | study_group | other
     format        TEXT NOT NULL DEFAULT 'self_paced',  -- live | self_paced | hybrid
     schedule_type TEXT NOT NULL DEFAULT 'ongoing',     -- one_time | multi_session | recurring | ongoing
+    max_members   INTEGER,
+    is_private    INTEGER NOT NULL DEFAULT 0,
     host_id       TEXT NOT NULL,
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT,
     FOREIGN KEY (host_id) REFERENCES users(id)
 );
 
@@ -94,6 +97,37 @@ CREATE INDEX IF NOT EXISTS idx_sessions_activity    ON sessions(activity_id);
 CREATE INDEX IF NOT EXISTS idx_sa_session           ON session_attendance(session_id);
 CREATE INDEX IF NOT EXISTS idx_sa_user              ON session_attendance(user_id);
 CREATE INDEX IF NOT EXISTS idx_at_activity          ON activity_tags(activity_id);
+
+-- STUDY GROUP MEMBERSHIPS & INVITES (keyed by activities.id for type='study_group')
+CREATE TABLE IF NOT EXISTS study_group_members (
+    id          TEXT PRIMARY KEY,
+    activity_id TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    role        TEXT NOT NULL DEFAULT 'member', -- creator | member
+    joined_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (activity_id, user_id),
+    FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id)     REFERENCES users(id)     ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS study_group_invites (
+    id          TEXT PRIMARY KEY,
+    activity_id TEXT NOT NULL,
+    inviter_id  TEXT NOT NULL,
+    invitee_id  TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | declined
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (activity_id, invitee_id),
+    FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+    FOREIGN KEY (inviter_id)  REFERENCES users(id)     ON DELETE CASCADE,
+    FOREIGN KEY (invitee_id)  REFERENCES users(id)     ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_sgm_activity        ON study_group_members(activity_id);
+CREATE INDEX IF NOT EXISTS idx_sgm_user            ON study_group_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_sgi_activity        ON study_group_invites(activity_id);
+CREATE INDEX IF NOT EXISTS idx_sgi_invitee_status  ON study_group_invites(invitee_id, status);
 
 -- NOTIFICATIONS
 CREATE TABLE IF NOT EXISTS notifications (
