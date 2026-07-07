@@ -6220,6 +6220,7 @@ async def _dispatch(request, env):
                     "_create_notification": _create_notification,
                     "blind_index": blind_index,
                     "decrypt_aes": decrypt_aes,
+                    "encrypt_aes": encrypt_aes,
                 },
             )
 

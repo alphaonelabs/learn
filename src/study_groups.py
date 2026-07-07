@@ -117,12 +117,15 @@ async def _list_groups(request, env, helpers):
         print(f"[study_groups._list_groups.ERROR] {type(exc).__name__}: {exc}")
         return helpers["err"]("Failed to list study groups", 500)
 
+    enc = env.ENCRYPTION_KEY
     groups = []
     for r in rows.results or []:
+         # description is stored encrypted at rest; decrypt for API response.
+        description_dec = await helpers["decrypt_aes"](r.description or "", enc) if r.description else ""
         groups.append({
             "id": r.id,
             "name": r.name,
-            "description": r.description,
+            "description": description_dec,
             "activity_id": r.activity_id,
             "creator_id": r.creator_id,
             "max_members": r.max_members,
@@ -460,6 +463,7 @@ async def _invite_member(group_id: str, request, env, helpers):
         ).bind(helpers["new_id"](), group_id, user["id"], invitee.id, "pending").run()
     except Exception as exc:
         if "UNIQUE" in str(exc):
+            # Reuse existing invite by resetting it to pending, then notify.
             try:
                 await env.DB.prepare(
                     "UPDATE study_group_invites"
@@ -468,10 +472,20 @@ async def _invite_member(group_id: str, request, env, helpers):
                 ).bind(user["id"], group_id, invitee.id).run()
             except Exception:
                 return helpers["err"]("Failed to create invitation", 500)
-            # Fall through so reused invitations also notify the invitee.
-            pass
+
+            await _notify(
+                helpers,
+                env,
+                invitee.id,
+                "Study Group Invitation",
+                f"{user.get('username', 'A user')} invited you to join {group.name}",
+                related_id=group_id,
+            )
+            return helpers["ok"](None, "Invitation sent")
+
         return helpers["err"]("Failed to create invitation", 500)
 
+    # New invite: notify and return success.
     await _notify(
         helpers,
         env,
@@ -639,12 +653,14 @@ async def _activity_groups(activity_id: str, request, env, helpers):
         " ORDER BY a.created_at DESC"
     ).bind(activity_id).all()
 
+    enc = env.ENCRYPTION_KEY
     groups = []
     for r in rows.results or []:
+        description_dec = await helpers["decrypt_aes"](r.description or "", enc) if r.description else ""
         groups.append({
             "id": r.id,
             "name": r.name,
-            "description": r.description,
+            "description": description_dec,
             "activity_id": r.activity_id,
             "creator_id": r.creator_id,
             "max_members": r.max_members,
