@@ -1,5 +1,5 @@
 import re
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Tuple
 from urllib.parse import urlparse, parse_qs
 
 
@@ -120,7 +120,7 @@ async def _list_groups(request, env, helpers):
     enc = env.ENCRYPTION_KEY
     groups = []
     for r in rows.results or []:
-         # description is stored encrypted at rest; decrypt for API response.
+        # description is stored encrypted at rest; decrypt for API response.
         description_dec = await helpers["decrypt_aes"](r.description or "", enc) if r.description else ""
         groups.append({
             "id": r.id,
