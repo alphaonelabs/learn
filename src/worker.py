@@ -895,7 +895,7 @@ _DDL = [
         type          TEXT NOT NULL DEFAULT 'course',
         format        TEXT NOT NULL DEFAULT 'self_paced',
         schedule_type TEXT NOT NULL DEFAULT 'ongoing',
-        max_members   INTEGER,
+        max_members   INTEGER CHECK (max_members IS NULL OR max_members >= 2),
         is_private    INTEGER NOT NULL DEFAULT 0,
         host_id       TEXT NOT NULL,
         created_at    TEXT NOT NULL DEFAULT (datetime('now')),
@@ -967,7 +967,8 @@ _DDL = [
         joined_at   TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (activity_id, user_id),
         FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_id)     REFERENCES users(id)     ON DELETE CASCADE
+        FOREIGN KEY (user_id)     REFERENCES users(id)     ON DELETE CASCADE,
+        CHECK (role IN ('creator','member'))
     )""",
     """CREATE TABLE IF NOT EXISTS study_group_invites (
         id          TEXT PRIMARY KEY,
@@ -980,7 +981,8 @@ _DDL = [
         UNIQUE (activity_id, invitee_id),
         FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
         FOREIGN KEY (inviter_id)  REFERENCES users(id)     ON DELETE CASCADE,
-        FOREIGN KEY (invitee_id)  REFERENCES users(id)     ON DELETE CASCADE
+        FOREIGN KEY (invitee_id)  REFERENCES users(id)     ON DELETE CASCADE,
+        CHECK (status IN ('pending','accepted','declined'))
     )""",
     "CREATE INDEX IF NOT EXISTS idx_sgm_activity        ON study_group_members(activity_id)",
     "CREATE INDEX IF NOT EXISTS idx_sgm_user            ON study_group_members(user_id)",
@@ -6378,10 +6380,14 @@ def _get_study_groups_module():
 
     try:
         mod = importlib.import_module("study_groups")
-    except Exception:
+    except ModuleNotFoundError as exc:
+        if exc.name != "study_groups":
+            raise
         try:
             mod = importlib.import_module("src.study_groups")
-        except Exception:
+        except ModuleNotFoundError as exc:
+            if exc.name != "src.study_groups":
+                raise
             spec = importlib.util.spec_from_file_location(
                 "study_groups", os.path.join(os.path.dirname(__file__), "study_groups.py")
             )

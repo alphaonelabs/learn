@@ -1,22 +1,23 @@
 import re
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlparse, parse_qs
 
 
-def _required_text(value):
+def _required_text(value: Any) -> Optional[str]:
     if value is None:
         return None
     txt = str(value).strip()
     return txt or None
 
 
-def _optional_text(value):
+def _optional_text(value: Any) -> str:
     if value is None:
         return ""
     txt = str(value).strip()
     return txt
 
 
-async def _auth(request, env, helpers):
+async def _auth(request, env, helpers) -> Tuple[Optional[Dict[str, Any]], Any]:
     user = helpers["verify_token"](request.headers.get("Authorization"), env.JWT_SECRET)
     if not user:
         return None, helpers["err"]("Authentication required", 401)
@@ -31,7 +32,7 @@ async def _auth(request, env, helpers):
     return user, None
 
 
-async def _notify(helpers, env, user_id: str, title: str, message: str, related_id: str = None):
+async def _notify(helpers, env, user_id: str, title: str, message: str, related_id: Optional[str] = None) -> None:
     try:
         await helpers["_create_notification"](
             env,
@@ -47,7 +48,7 @@ async def _notify(helpers, env, user_id: str, title: str, message: str, related_
     return None
 
 
-async def _run_batch(env, statements):
+async def _run_batch(env, statements: Iterable[Any]) -> None:
     if hasattr(env.DB, "batch"):
         return await env.DB.batch(statements)
     for stmt in statements:
@@ -112,7 +113,8 @@ async def _list_groups(request, env, helpers):
     try:
         rows = await env.DB.prepare(sql).bind(*bind_args).all()
     except Exception as exc:
-        print(f"[study_groups._list_groups.bind] bind_args={bind_args!r} error={exc}")
+        # Avoid logging user-provided content; keep operation and exception only.
+        print(f"[study_groups._list_groups.ERROR] {type(exc).__name__}: {exc}")
         return helpers["err"]("Failed to list study groups", 500)
 
     groups = []
@@ -168,13 +170,16 @@ async def _create_group(request, env, helpers):
     group_id = helpers["new_id"]()
     member_id = helpers["new_id"]()
 
+    enc = env.ENCRYPTION_KEY
+
     try:
         # Insert the activity itself (type='study_group'). Other fields use
-        # schema defaults (format, schedule_type).
+        # schema defaults (format, schedule_type). Description is encrypted at rest.
+        enc_description = await helpers["encrypt_aes"](description, enc) if description else ""
         stmt_activity = env.DB.prepare(
             "INSERT INTO activities (id,title,description,type,max_members,is_private,host_id)"
             " VALUES (?,?,NULLIF(?, ''),?,?,?,?)"
-        ).bind(group_id, name, description, "study_group", max_members, 1 if is_private else 0, user["id"])
+        ).bind(group_id, name, enc_description, "study_group", max_members, 1 if is_private else 0, user["id"])
 
         # Insert creator membership row keyed by the activity (group) id.
         stmt_member = env.DB.prepare(
@@ -183,12 +188,8 @@ async def _create_group(request, env, helpers):
 
         await _run_batch(env, [stmt_activity, stmt_member])
     except Exception as exc:
-        print(
-            "[study_groups._create_group.bind] "
-            f"group_id={group_id!r} name={name!r} description={description!r} "
-            f"user_id={user.get('id')!r} "
-            f"max_members={max_members!r} is_private={is_private!r} error={exc}"
-        )
+        # Avoid logging user-provided content; keep stable context only.
+        print(f"[study_groups._create_group.ERROR] {type(exc).__name__}: {exc}")
         return helpers["err"]("Failed to create study group", 500)
 
     row = await env.DB.prepare(
@@ -205,11 +206,14 @@ async def _create_group(request, env, helpers):
         "  FROM activities a WHERE a.id=? AND a.type='study_group'"
     ).bind(group_id).first()
 
+    # Decrypt description for API response.
+    description_dec = await helpers["decrypt_aes"](row.description or "", enc) if row.description else ""
+
     return helpers["ok"]({
         "group": {
             "id": row.id,
             "name": row.name,
-            "description": row.description,
+            "description": description_dec,
             "activity_id": row.activity_id,
             "creator_id": row.creator_id,
             "max_members": row.max_members,
@@ -225,6 +229,8 @@ async def _group_detail(group_id: str, request, env, helpers):
     user, bad = await _auth(request, env, helpers)
     if bad:
         return bad
+
+    enc = env.ENCRYPTION_KEY
 
     group = await env.DB.prepare(
         "SELECT a.id,"
@@ -270,12 +276,13 @@ async def _group_detail(group_id: str, request, env, helpers):
         })
 
     creator_username = await helpers["decrypt_aes"](group.creator_username_enc or "", env.ENCRYPTION_KEY)
+    description_dec = await helpers["decrypt_aes"](group.description or "", enc) if group.description else ""
 
     return helpers["ok"]({
         "group": {
             "id": group.id,
             "name": group.name,
-            "description": group.description,
+            "description": description_dec,
             "activity_id": group.activity_id,
             "creator_id": group.creator_id,
             "creator_username": creator_username,
@@ -336,15 +343,26 @@ async def _join_group(group_id: str, request, env, helpers):
     if existing:
         return helpers["err"]("You are already a member of this group", 409)
 
-    count_row = await env.DB.prepare(
-        "SELECT COUNT(*) AS cnt FROM study_group_members WHERE activity_id=?"
-    ).bind(group_id).first()
-    if (count_row.cnt if count_row else 0) >= group.max_members:
-        return helpers["err"]("This group is full", 400)
+    # Capacity check: perform insert and enforce capacity in one step to avoid
+    # race conditions with concurrent joins.
+    try:
+        await env.DB.prepare(
+            "INSERT INTO study_group_members (id,activity_id,user_id,role)"
+            " SELECT ?, ?, ?, 'member'"
+            " WHERE (SELECT COUNT(*) FROM study_group_members WHERE activity_id=?)"
+            "       < COALESCE((SELECT max_members FROM activities WHERE id=?), 1000000000)"
+        ).bind(helpers["new_id"](), group_id, user["id"], group_id, group_id).run()
+    except Exception as exc:
+        if "UNIQUE" in str(exc):
+            return helpers["err"]("You are already a member of this group", 400)
+        return helpers["err"]("Failed to join study group", 500)
 
-    await env.DB.prepare(
-        "INSERT INTO study_group_members (id,activity_id,user_id,role) VALUES (?,?,?,?)"
-    ).bind(helpers["new_id"](), group_id, user["id"], "member").run()
+    # Verify that the user is now a member; if not, capacity was reached.
+    joined = await env.DB.prepare(
+        "SELECT id FROM study_group_members WHERE activity_id=? AND user_id=?"
+    ).bind(group_id, user["id"]).first()
+    if not joined:
+        return helpers["err"]("This group is full", 400)
 
     if group.creator_id != user["id"]:
         await _notify(
@@ -450,7 +468,8 @@ async def _invite_member(group_id: str, request, env, helpers):
                 ).bind(user["id"], group_id, invitee.id).run()
             except Exception:
                 return helpers["err"]("Failed to create invitation", 500)
-            return helpers["ok"](None, "Invitation sent")
+            # Fall through so reused invitations also notify the invitee.
+            pass
         return helpers["err"]("Failed to create invitation", 500)
 
     await _notify(
@@ -532,26 +551,33 @@ async def _respond_invitation(invite_id: str, request, env, helpers):
         if existing:
             return helpers["err"]("You are already a member of this group", 400)
 
-        count_row = await env.DB.prepare(
-            "SELECT COUNT(*) AS cnt FROM study_group_members WHERE activity_id=?"
-        ).bind(invite.activity_id).first()
+        # Capacity check: atomically insert the membership row only when the
+        # group is below max_members to avoid races with concurrent accepts.
+        try:
+            await env.DB.prepare(
+                "INSERT INTO study_group_members (id,activity_id,user_id,role)"
+                " SELECT ?, ?, ?, 'member'"
+                " WHERE (SELECT COUNT(*) FROM study_group_members WHERE activity_id=?)"
+                "       < COALESCE((SELECT max_members FROM activities WHERE id=?), 1000000000)"
+            ).bind(helpers["new_id"](), invite.activity_id, user["id"], invite.activity_id, invite.activity_id).run()
+        except Exception as exc:
+            if "UNIQUE" in str(exc):
+                return helpers["err"]("You are already a member of this group", 400)
+            return helpers["err"]("Failed to accept invitation", 500)
 
-        if (count_row.cnt if count_row else 0) >= invite.max_members:
+        joined = await env.DB.prepare(
+            "SELECT id FROM study_group_members WHERE activity_id=? AND user_id=?"
+        ).bind(invite.activity_id, user["id"]).first()
+        if not joined:
             return helpers["err"]("This group is full", 400)
-
-        stmt_member = env.DB.prepare(
-            "INSERT INTO study_group_members (id,activity_id,user_id,role) VALUES (?,?,?,?)"
-        ).bind(helpers["new_id"](), invite.activity_id, user["id"], "member")
 
         stmt_update = env.DB.prepare(
             "UPDATE study_group_invites SET status='accepted', updated_at=datetime('now') WHERE id=?"
         ).bind(invite_id)
 
         try:
-            await _run_batch(env, [stmt_member, stmt_update])
-        except Exception as exc:
-            if "UNIQUE" in str(exc):
-                return helpers["err"]("You are already a member of this group", 400)
+            await _run_batch(env, [stmt_update])
+        except Exception:
             return helpers["err"]("Failed to accept invitation", 500)
 
         await _notify(
