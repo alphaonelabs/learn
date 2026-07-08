@@ -341,7 +341,7 @@ async def _join_group(group_id: str, request, env, helpers):
         return helpers["err"]("Private groups require an invitation", 403)
 
     existing = await env.DB.prepare(
-        "SELECT id FROM study_group_members WHERE activity_id=? AND user_id=?"
+        "SELECT id FROM activity_members WHERE activity_id=? AND user_id=?"
     ).bind(group_id, user["id"]).first()
     if existing:
         return helpers["err"]("You are already a member of this group", 409)
@@ -350,9 +350,9 @@ async def _join_group(group_id: str, request, env, helpers):
     # race conditions with concurrent joins.
     try:
         await env.DB.prepare(
-            "INSERT INTO study_group_members (id,activity_id,user_id,role)"
+            "INSERT INTO activity_members (id,activity_id,user_id,role)"
             " SELECT ?, ?, ?, 'member'"
-            " WHERE (SELECT COUNT(*) FROM study_group_members WHERE activity_id=?)"
+            " WHERE (SELECT COUNT(*) FROM activity_members WHERE activity_id=?)"
             "       < COALESCE((SELECT max_members FROM activities WHERE id=?), 1000000000)"
         ).bind(helpers["new_id"](), group_id, user["id"], group_id, group_id).run()
     except Exception as exc:
@@ -362,7 +362,7 @@ async def _join_group(group_id: str, request, env, helpers):
 
     # Verify that the user is now a member; if not, capacity was reached.
     joined = await env.DB.prepare(
-        "SELECT id FROM study_group_members WHERE activity_id=? AND user_id=?"
+        "SELECT id FROM activity_members WHERE activity_id=? AND user_id=?"
     ).bind(group_id, user["id"]).first()
     if not joined:
         return helpers["err"]("This group is full", 400)
@@ -450,7 +450,7 @@ async def _invite_member(group_id: str, request, env, helpers):
         return helpers["err"]("User is already a member of this group", 400)
 
     pending = await env.DB.prepare(
-        "SELECT id FROM study_group_invites"
+        "SELECT id FROM activity_invites"
         " WHERE activity_id=? AND invitee_id=? AND status='pending'"
     ).bind(group_id, invitee.id).first()
     if pending:
@@ -458,7 +458,7 @@ async def _invite_member(group_id: str, request, env, helpers):
 
     try:
         await env.DB.prepare(
-            "INSERT INTO study_group_invites (id,activity_id,inviter_id,invitee_id,status)"
+            "INSERT INTO activity_invites (id,activity_id,inviter_id,invitee_id,status)"
             " VALUES (?,?,?,?,?)"
         ).bind(helpers["new_id"](), group_id, user["id"], invitee.id, "pending").run()
     except Exception as exc:
@@ -466,7 +466,7 @@ async def _invite_member(group_id: str, request, env, helpers):
             # Reuse existing invite by resetting it to pending, then notify.
             try:
                 await env.DB.prepare(
-                    "UPDATE study_group_invites"
+                    "UPDATE activity_invites"
                     " SET inviter_id=?, status='pending', updated_at=datetime('now')"
                     " WHERE activity_id=? AND invitee_id=?"
                 ).bind(user["id"], group_id, invitee.id).run()
@@ -571,7 +571,7 @@ async def _respond_invitation(invite_id: str, request, env, helpers):
             await env.DB.prepare(
                 "INSERT INTO activity_members (id,activity_id,user_id,role)"
                 " SELECT ?, ?, ?, 'member'"
-                " WHERE (SELECT COUNT(*) FROM study_group_members WHERE activity_id=?)"
+                " WHERE (SELECT COUNT(*) FROM activity_members WHERE activity_id=?)"
                 "       < COALESCE((SELECT max_members FROM activities WHERE id=?), 1000000000)"
             ).bind(helpers["new_id"](), invite.activity_id, user["id"], invite.activity_id, invite.activity_id).run()
         except Exception as exc:
