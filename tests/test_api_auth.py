@@ -4,12 +4,20 @@ Tests for api_register() and api_login() handlers.
 
 import base64
 import json
+import pytest
 from tests.helpers import load_worker, MockRequest, MockRow, MockDB, make_env, make_stmt, json_request
 
 worker = load_worker()
 
 SECRET = "test-encryption-key"
 JWT = "test-jwt-secret"
+
+
+@pytest.fixture(autouse=True)
+def clear_auth_rate_limit_state():
+    worker._AUTH_RATE_LIMIT_STATE.clear()
+    yield
+    worker._AUTH_RATE_LIMIT_STATE.clear()
 
 
 def _parse(resp):
@@ -35,7 +43,13 @@ def _enc(val: str) -> str:
 
 class TestApiRegister:
     def _req(self, payload):
-        return json_request("/api/register", payload)
+        return json_request("/api/register", payload, headers={"CF-Connecting-IP": "127.0.0.1"})
+
+    def _rate_limited_env(self):
+        env = make_env(db=MockDB([make_stmt()]))
+        env.AUTH_RATE_LIMIT_WINDOW_SECONDS = 60
+        env.AUTH_RATE_LIMIT_MAX_ATTEMPTS = 2
+        return env
 
     async def test_missing_username_returns_400(self):
         env = make_env()
@@ -70,9 +84,9 @@ class TestApiRegister:
         assert r.status == 200
         data = _parse(r)
         assert data["success"] is True
-        assert "token" in data["data"]
-        assert data["data"]["user"]["username"] == "alice"
-        assert data["data"]["user"]["role"] == "member"
+        # Registration no longer returns a token — user must verify email first.
+        assert data.get("data") is None
+        assert "email" in data["message"].lower()
 
     async def test_name_defaults_to_username(self):
         env = make_env(db=MockDB([make_stmt()]))
@@ -80,7 +94,7 @@ class TestApiRegister:
             self._req({"username": "bob", "email": "bob@example.com", "password": "password123"}), env
         )
         data = _parse(r)
-        assert data["data"]["user"]["name"] == "bob"
+        assert data["success"] is True  # name is stored in DB, not returned in response
 
     async def test_custom_name_preserved(self):
         env = make_env(db=MockDB([make_stmt()]))
@@ -89,7 +103,7 @@ class TestApiRegister:
             env,
         )
         data = _parse(r)
-        assert data["data"]["user"]["name"] == "Robert"
+        assert data["success"] is True  # name is stored in DB, not returned in response
 
     async def test_duplicate_user_returns_409(self):
         # Simulate UNIQUE constraint violation from D1
@@ -112,21 +126,47 @@ class TestApiRegister:
         )
         assert r.status == 500
 
-    async def test_token_is_verifiable(self):
+    async def test_registration_sends_verification_message(self):
+        # Registration no longer issues a token; user must verify email first.
         env = make_env(db=MockDB([make_stmt()]))
         r = await worker.api_register(
             self._req({"username": "alice", "email": "a@b.com", "password": "password123"}), env
         )
-        token = _parse(r)["data"]["token"]
-        payload = worker.verify_token(token, JWT)
-        assert payload is not None
-        assert payload["username"] == "alice"
+        assert r.status == 200
+        data = _parse(r)
+        assert data["success"] is True
+        assert "email" in data["message"].lower()
 
     async def test_invalid_json_returns_400(self):
         req = MockRequest(method="POST", url="http://localhost/api/register",
+                          headers={"CF-Connecting-IP": "127.0.0.1"},
                           body="not-json")
         r = await worker.api_register(req, make_env())
         assert r.status == 400
+
+    async def test_register_is_rate_limited_per_ip(self):
+        env = self._rate_limited_env()
+        ip = "203.0.113.10"
+
+        first_req = self._req({"username": "alice1", "email": "alice1@example.com", "password": "password123"})
+        first_req.headers["CF-Connecting-IP"] = ip
+        second_req = self._req({"username": "alice2", "email": "alice2@example.com", "password": "password123"})
+        second_req.headers["CF-Connecting-IP"] = ip
+        third_req = self._req({"username": "alice3", "email": "alice3@example.com", "password": "password123"})
+        third_req.headers["CF-Connecting-IP"] = ip
+
+        first = await worker.api_register(first_req, env)
+        second = await worker.api_register(second_req, env)
+        third = await worker.api_register(third_req, env)
+
+        assert first.status == 200
+        assert second.status == 200
+        assert third.status == 429
+        assert "Retry-After" in third.headers
+        retry_after = third.headers["Retry-After"]
+        assert retry_after.isdigit()
+        assert int(retry_after) > 0
+        assert _parse(third).get("error") == "Too many requests"
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +175,13 @@ class TestApiRegister:
 
 class TestApiLogin:
     def _req(self, payload):
-        return json_request("/api/login", payload)
+        return json_request("/api/login", payload, headers={"CF-Connecting-IP": "127.0.0.1"})
+
+    def _rate_limited_env(self):
+        env = make_env(db=MockDB([make_stmt(first=None)]))
+        env.AUTH_RATE_LIMIT_WINDOW_SECONDS = 60
+        env.AUTH_RATE_LIMIT_MAX_ATTEMPTS = 2
+        return env
 
     def _make_user_row(self, username="alice", password="password123", role="member", name="Alice"):
         pw_hash = worker.hash_password(password, username)
@@ -145,6 +191,7 @@ class TestApiLogin:
             role=_enc(role),
             name=_enc(name),
             username=_enc(username),
+            email_verified=1,
         )
 
     async def test_missing_username_returns_400(self):
@@ -192,6 +239,75 @@ class TestApiLogin:
         assert payload is not None
 
     async def test_invalid_json_returns_400(self):
-        req = MockRequest(method="POST", url="http://localhost/api/login", body="bad-json")
+        req = MockRequest(method="POST", url="http://localhost/api/login", headers={"CF-Connecting-IP": "127.0.0.1"}, body="bad-json")
         r = await worker.api_login(req, make_env())
         assert r.status == 400
+
+    async def test_login_is_rate_limited_per_ip(self):
+        row = self._make_user_row()
+        env = self._rate_limited_env()
+        env.DB = MockDB([
+            make_stmt(first=row),
+            make_stmt(first=row),
+            make_stmt(first=row),
+        ])
+
+        req1 = self._req({"username": "alice", "password": "password123"})
+        req1.headers["CF-Connecting-IP"] = "203.0.113.10"
+        req2 = self._req({"username": "alice", "password": "password123"})
+        req2.headers["CF-Connecting-IP"] = "203.0.113.10"
+        req3 = self._req({"username": "alice", "password": "password123"})
+        req3.headers["CF-Connecting-IP"] = "203.0.113.10"
+
+        first = await worker.api_login(req1, env)
+        second = await worker.api_login(req2, env)
+        third = await worker.api_login(req3, env)
+
+        assert first.status == 200
+        assert second.status == 200
+        assert third.status == 429
+        assert "Retry-After" in third.headers
+        retry_after = third.headers["Retry-After"]
+        assert retry_after.isdigit()
+        assert int(retry_after) > 0
+        assert _parse(third).get("error") == "Too many requests"
+
+    async def test_login_rate_limit_resets_after_window(self, monkeypatch):
+        row = self._make_user_row()
+        env = self._rate_limited_env()
+        env.DB = MockDB([
+            make_stmt(first=row),
+            make_stmt(first=row),
+            make_stmt(first=row),
+            make_stmt(first=row),
+        ])
+
+        worker._AUTH_RATE_LIMIT_STATE.clear()
+        monkeypatch.setattr(worker.time, "time", lambda: 1000)
+
+        req1 = self._req({"username": "alice", "password": "password123"})
+        req1.headers["CF-Connecting-IP"] = "198.51.100.10"
+        req2 = self._req({"username": "alice", "password": "password123"})
+        req2.headers["CF-Connecting-IP"] = "198.51.100.10"
+
+        assert (await worker.api_login(req1, env)).status == 200
+        assert (await worker.api_login(req2, env)).status == 200
+
+        monkeypatch.setattr(worker.time, "time", lambda: 1000 + 61)
+        req3 = self._req({"username": "alice", "password": "password123"})
+        req3.headers["CF-Connecting-IP"] = "198.51.100.10"
+        assert (await worker.api_login(req3, env)).status == 200
+
+        req4 = self._req({"username": "alice", "password": "password123"})
+        req4.headers["CF-Connecting-IP"] = "198.51.100.10"
+        assert (await worker.api_login(req4, env)).status == 200
+
+        req5 = self._req({"username": "alice", "password": "password123"})
+        req5.headers["CF-Connecting-IP"] = "198.51.100.10"
+        limited = await worker.api_login(req5, env)
+        assert limited.status == 429
+        assert "Retry-After" in limited.headers
+        limited_retry_after = limited.headers["Retry-After"]
+        assert limited_retry_after.isdigit()
+        assert int(limited_retry_after) > 0
+        assert _parse(limited).get("error") == "Too many requests"
