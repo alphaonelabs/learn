@@ -43,24 +43,24 @@ import re
 import time
 import traceback
 from types import SimpleNamespace
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse, parse_qs, urlencode, quote, unquote
 import uuid
+
+import js
+from pyodide.ffi import to_js
+from js import WebSocketPair, WebSocketRequestResponsePair
 from workers import DurableObject, Response
 
 class WaitingRoomDO(DurableObject):
-    def __init__(self, state, env):
+    def __init__(self, state, env) -> None:
         super().__init__(state, env)
         self.state = state
         self.env = env
-        self.rooms = None  # lazy load durable state
+        self.rooms: Optional[Dict[str, Any]] = None  # lazy load durable state
 
-    async def on_fetch(self, request):
-        url = urlparse(request.url)
-        method = request.method.upper()
-        path = url.path
-        auth_user = verify_token(
-            request.headers.get("Authorization") or "",
-            getattr(self.env, "JWT_SECRET", "") or "",
-        )
+    async def _load_rooms(self) -> None:
+        """Lazily load room state from durable storage."""
         if self.rooms is None:
             stored_rooms = await self.state.storage.get("rooms")
             if isinstance(stored_rooms, str) and stored_rooms:
@@ -68,42 +68,98 @@ class WaitingRoomDO(DurableObject):
             else:
                 self.rooms = {}
 
-        def _normalize_participants(raw):
-            items = raw if isinstance(raw, list) else []
-            out = []
-            for p in items:
-                if isinstance(p, dict):
-                    pid = str(p.get("id") or "").strip()
-                    name = str(p.get("name") or "").strip() or "anonymous"
-                    if not pid:
-                        pid = name.lower()
-                    out.append({"id": pid, "name": name})
-                elif isinstance(p, str):
-                    name = p.strip() or "anonymous"
-                    out.append({"id": name.lower(), "name": name})
-            return out
+    async def _save_rooms(self) -> None:
+        """Persist room state to durable storage."""
+        await self.state.storage.put("rooms", json.dumps(self.rooms))
 
-        m_room = re.fullmatch(r"/api/waitingroom/([A-Za-z0-9_-]+)", path)
+    @staticmethod
+    def _normalize_participants(raw: Any) -> List[Dict[str, str]]:
+        """Normalize participant list to [{id, name}] format."""
+        items = raw if isinstance(raw, list) else []
+        out: List[Dict[str, str]] = []
+        for p in items:
+            if isinstance(p, dict):
+                pid = str(p.get("id") or "").strip()
+                name = str(p.get("name") or "").strip() or "anonymous"
+                if not pid:
+                    pid = name.lower()
+                out.append({"id": pid, "name": name})
+            elif isinstance(p, str):
+                name = p.strip() or "anonymous"
+                out.append({"id": name.lower(), "name": name})
+        return out
+
+    @staticmethod
+    def _parse_json_safe(text: str) -> Optional[dict]:
+        """Safely parse JSON; returns None on failure."""
+        try:
+            body = json.loads(text)
+            return body if isinstance(body, dict) else None
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return None
+
+    def _json_ok(self, data: Any, status: int = 200) -> Response:
+        return Response(
+            json.dumps(data),
+            status=status,
+            headers={"Content-Type": "application/json"},
+        )
+
+    def _json_err(self, error: str, status: int = 400) -> Response:
+        return Response(
+            json.dumps({"error": error}),
+            status=status,
+            headers={"Content-Type": "application/json"},
+        )
+
+    def _check_creator_permission(self, room: dict, actor: str, actor_id: str, action_label: str) -> Optional[Response]:
+        """Verify actor is the room creator. Returns error Response or None."""
+        creator = str(room.get("creator") or "").strip()
+        creator_id = str(room.get("creatorId") or "").strip()
+        normalized_actor = actor.lower()
+        normalized_creator = creator.lower()
+        # Backward compat: allow match on either id OR name.
+        id_matches = bool(creator_id and actor_id and actor_id == creator_id)
+        name_matches = bool(actor and creator and normalized_actor == normalized_creator)
+        if not (id_matches or name_matches):
+            return self._json_err(f"Only the creator can {action_label} this room", 403)
+        return None
+
+    async def on_fetch(self, request) -> Response:
+        url = urlparse(request.url)
+        method = request.method.upper()
+        path = url.path
+        auth_user = verify_token(
+            request.headers.get("Authorization") or "",
+            getattr(self.env, "JWT_SECRET", "") or "",
+        )
+        await self._load_rooms()
+
+        # --- GET /api/waitingroom/<id> (single room detail) ---
+        # Negative lookahead excludes reserved sub-paths.
+        m_room = re.fullmatch(
+            r"/api/waitingroom/(?!create|join|leave|delete|fulfill\b)([A-Za-z0-9_-]+)", path
+        )
         if m_room and method == "GET":
             room_id = m_room.group(1)
             room = self.rooms.get(room_id)
             if not room:
-                return Response(
-                    json.dumps({"error": "Room not found"}),
-                    status=404,
-                    headers={"Content-Type": "application/json"},
-                )
-            return Response(
-                json.dumps({"room": room}),
-                headers={"Content-Type": "application/json"},
-            )
+                return self._json_err("Room not found", 404)
+            return self._json_ok({"room": room})
 
-        if path.endswith('/api/waitingrooms') and method == 'GET':
-            # List all rooms
-            return Response(json.dumps({"rooms": list(self.rooms.values())}), headers={"Content-Type": "application/json"})
-        if path.endswith('/api/waitingroom/create') and method == 'POST':
-            data = await request.json()
-            room_id = 'r_' + str(uuid.uuid4())
+        # --- GET /api/waitingrooms (list all) ---
+        if path == "/api/waitingrooms" and method == "GET":
+            return self._json_ok({"rooms": list(self.rooms.values())})
+
+        # --- POST /api/waitingroom/create ---
+        if path == "/api/waitingroom/create" and method == "POST":
+            try:
+                data = await request.json()
+            except Exception:
+                return self._json_err("Invalid JSON body", 400)
+            if not isinstance(data, dict):
+                return self._json_err("JSON body must be an object", 400)
+            room_id = "r_" + str(uuid.uuid4())
             room = {
                 "id": room_id,
                 "title": data.get("title", ""),
@@ -118,28 +174,34 @@ class WaitingRoomDO(DurableObject):
                 "fulfilledBy": "",
                 "courseId": "",
                 "courseTitle": "",
-                "participants": []
+                "participants": [],
             }
             self.rooms[room_id] = room
-            await self.state.storage.put("rooms", json.dumps(self.rooms))
-            return Response(json.dumps(room), headers={"Content-Type": "application/json"})
+            await self._save_rooms()
+            return self._json_ok(room)
 
-        if path.endswith('/api/waitingroom/join') and method == 'POST':
-            data = await request.json()
+        # --- POST /api/waitingroom/join ---
+        if path == "/api/waitingroom/join" and method == "POST":
+            try:
+                data = await request.json()
+            except Exception:
+                return self._json_err("Invalid JSON body", 400)
+            if not isinstance(data, dict):
+                return self._json_err("JSON body must be an object", 400)
             room_id = str(data.get("roomId") or data.get("room_id") or "").strip()
             name = auth_user["username"] if auth_user else str(data.get("name") or data.get("user") or "").strip()
             participant_id = auth_user["id"] if auth_user else str(data.get("participantId") or "").strip()
             if not room_id:
-                return Response(json.dumps({"error": "roomId is required"}), status=400, headers={"Content-Type": "application/json"})
+                return self._json_err("roomId is required", 400)
             room = self.rooms.get(room_id)
             if not room:
-                return Response(json.dumps({"error": "Room not found"}), status=404, headers={"Content-Type": "application/json"})
+                return self._json_err("Room not found", 404)
             if not name:
                 name = "anonymous"
             if not participant_id:
                 participant_id = name.lower()
 
-            participants = _normalize_participants(room.get("participants"))
+            participants = self._normalize_participants(room.get("participants"))
             updated = False
             for p in participants:
                 if p["id"] == participant_id:
@@ -150,81 +212,86 @@ class WaitingRoomDO(DurableObject):
                 participants.append({"id": participant_id, "name": name})
             room["participants"] = participants
             self.rooms[room_id] = room
-            await self.state.storage.put("rooms", json.dumps(self.rooms))
-            return Response(json.dumps(room), headers={"Content-Type": "application/json"})
+            await self._save_rooms()
+            return self._json_ok(room)
 
-        if path.endswith('/api/waitingroom/leave') and method == 'POST':
-            data = await request.json()
+        # --- POST /api/waitingroom/leave ---
+        if path == "/api/waitingroom/leave" and method == "POST":
+            try:
+                data = await request.json()
+            except Exception:
+                return self._json_err("Invalid JSON body", 400)
+            if not isinstance(data, dict):
+                return self._json_err("JSON body must be an object", 400)
             room_id = str(data.get("roomId") or data.get("room_id") or "").strip()
             name = auth_user["username"] if auth_user else str(data.get("name") or data.get("user") or "").strip()
             participant_id = auth_user["id"] if auth_user else str(data.get("participantId") or "").strip()
             if not room_id or (not name and not participant_id):
-                return Response(json.dumps({"error": "roomId and participant identity are required"}), status=400, headers={"Content-Type": "application/json"})
+                return self._json_err("roomId and participant identity are required", 400)
             room = self.rooms.get(room_id)
             if not room:
-                return Response(json.dumps({"error": "Room not found"}), status=404, headers={"Content-Type": "application/json"})
+                return self._json_err("Room not found", 404)
 
-            participants = _normalize_participants(room.get("participants"))
+            participants = self._normalize_participants(room.get("participants"))
             if participant_id:
                 room["participants"] = [p for p in participants if p["id"] != participant_id]
             else:
                 room["participants"] = [p for p in participants if p["name"].lower() != name.lower()]
             self.rooms[room_id] = room
-            await self.state.storage.put("rooms", json.dumps(self.rooms))
-            return Response(json.dumps(room), headers={"Content-Type": "application/json"})
+            await self._save_rooms()
+            return self._json_ok(room)
 
-        if path.endswith('/api/waitingroom/delete') and method == 'POST':
-            data = await request.json()
+        # --- POST /api/waitingroom/delete ---
+        if path == "/api/waitingroom/delete" and method == "POST":
+            if not auth_user:
+                return self._json_err("Authentication required", 401)
+            try:
+                data = await request.json()
+            except Exception:
+                return self._json_err("Invalid JSON body", 400)
+            if not isinstance(data, dict):
+                return self._json_err("JSON body must be an object", 400)
             room_id = str(data.get("roomId") or data.get("room_id") or "").strip()
-            actor = auth_user["username"] if auth_user else str(data.get("actor") or data.get("name") or "").strip()
-            actor_id = auth_user["id"] if auth_user else str(data.get("actorId") or "").strip()
+            actor = auth_user["username"]
+            actor_id = auth_user["id"]
             if not room_id:
-                return Response(json.dumps({"error": "roomId is required"}), status=400, headers={"Content-Type": "application/json"})
+                return self._json_err("roomId is required", 400)
             room = self.rooms.get(room_id)
             if not room:
-                return Response(json.dumps({"error": "Room not found"}), status=404, headers={"Content-Type": "application/json"})
-            creator = str(room.get("creator") or "").strip()
-            creator_id = str(room.get("creatorId") or "").strip()
-            normalized_actor = actor.lower()
-            normalized_creator = creator.lower()
-            # Backward compatibility:
-            # some existing rooms may carry a stale/migrated creatorId while still having
-            # the correct creator name. Allow delete when either identity (id OR name) matches.
-            id_matches = bool(creator_id and actor_id and actor_id == creator_id)
-            name_matches = bool(actor and creator and normalized_actor == normalized_creator)
-            if creator_id and not (id_matches or name_matches):
-                return Response(json.dumps({"error": "Only the creator can delete this room"}), status=403, headers={"Content-Type": "application/json"})
-            if not creator_id and actor and creator and not name_matches:
-                return Response(json.dumps({"error": "Only the creator can delete this room"}), status=403, headers={"Content-Type": "application/json"})
+                return self._json_err("Room not found", 404)
+            perm_err = self._check_creator_permission(room, actor, actor_id, "delete")
+            if perm_err:
+                return perm_err
 
             del self.rooms[room_id]
-            await self.state.storage.put("rooms", json.dumps(self.rooms))
-            return Response(json.dumps({"success": True, "roomId": room_id}), headers={"Content-Type": "application/json"})
+            await self._save_rooms()
+            return self._json_ok({"success": True, "roomId": room_id})
 
-        if path.endswith('/api/waitingroom/fulfill') and method == 'POST':
-            data = await request.json()
+        # --- POST /api/waitingroom/fulfill ---
+        if path == "/api/waitingroom/fulfill" and method == "POST":
+            if not auth_user:
+                return self._json_err("Authentication required", 401)
+            try:
+                data = await request.json()
+            except Exception:
+                return self._json_err("Invalid JSON body", 400)
+            if not isinstance(data, dict):
+                return self._json_err("JSON body must be an object", 400)
             room_id = str(data.get("roomId") or data.get("room_id") or "").strip()
-            actor = auth_user["username"] if auth_user else str(data.get("actor") or data.get("name") or "").strip()
-            actor_id = auth_user["id"] if auth_user else str(data.get("actorId") or "").strip()
+            actor = auth_user["username"]
+            actor_id = auth_user["id"]
             course_id = str(data.get("courseId") or "").strip()
             course_title = str(data.get("courseTitle") or "").strip()
             if not room_id:
-                return Response(json.dumps({"error": "roomId is required"}), status=400, headers={"Content-Type": "application/json"})
+                return self._json_err("roomId is required", 400)
             if not course_id:
-                return Response(json.dumps({"error": "courseId is required"}), status=400, headers={"Content-Type": "application/json"})
+                return self._json_err("courseId is required", 400)
             room = self.rooms.get(room_id)
             if not room:
-                return Response(json.dumps({"error": "Room not found"}), status=404, headers={"Content-Type": "application/json"})
-            creator = str(room.get("creator") or "").strip()
-            creator_id = str(room.get("creatorId") or "").strip()
-            normalized_actor = actor.lower()
-            normalized_creator = creator.lower()
-            id_matches = bool(creator_id and actor_id and actor_id == creator_id)
-            name_matches = bool(actor and creator and normalized_actor == normalized_creator)
-            if creator_id and not (id_matches or name_matches):
-                return Response(json.dumps({"error": "Only the creator can fulfill this room"}), status=403, headers={"Content-Type": "application/json"})
-            if not creator_id and actor and creator and not name_matches:
-                return Response(json.dumps({"error": "Only the creator can fulfill this room"}), status=403, headers={"Content-Type": "application/json"})
+                return self._json_err("Room not found", 404)
+            perm_err = self._check_creator_permission(room, actor, actor_id, "fulfill")
+            if perm_err:
+                return perm_err
 
             room["fulfilled"] = True
             room["fulfilledAt"] = int(data.get("fulfilledAt") or 0) or int(js.Date.now())
@@ -232,17 +299,12 @@ class WaitingRoomDO(DurableObject):
             room["courseId"] = course_id
             room["courseTitle"] = course_title
             self.rooms[room_id] = room
-            await self.state.storage.put("rooms", json.dumps(self.rooms))
-            return Response(json.dumps(room), headers={"Content-Type": "application/json"})
+            await self._save_rooms()
+            return self._json_ok(room)
 
-        return Response(json.dumps({"error": "Not implemented"}), status=404, headers={"Content-Type": "application/json"})
+        return self._json_err("Not implemented", 404)
 
-from typing import Any, Dict, Optional
-from urllib.parse import urlparse, parse_qs, urlencode, quote, unquote
-
-import js
-from pyodide.ffi import to_js
-from js import WebSocketPair, WebSocketRequestResponsePair
+# Imports moved to top of file (PEP 8 E402).
 
 _SENTRY_INITIALIZED = False
 _SENTRY_DSN: str = ""
@@ -3163,21 +3225,24 @@ async def api_delete_activity(req, env):
         return err("Activity not found or access denied", 404)
 
     try:
-        await env.DB.prepare(
-            "DELETE FROM session_attendance WHERE session_id IN (SELECT id FROM sessions WHERE activity_id=?)"
-        ).bind(act_id).run()
-        await env.DB.prepare(
-            "DELETE FROM sessions WHERE activity_id=?"
-        ).bind(act_id).run()
-        await env.DB.prepare(
-            "DELETE FROM enrollments WHERE activity_id=?"
-        ).bind(act_id).run()
-        await env.DB.prepare(
-            "DELETE FROM activity_tags WHERE activity_id=?"
-        ).bind(act_id).run()
-        await env.DB.prepare(
-            "DELETE FROM activities WHERE id=? AND host_id=?"
-        ).bind(act_id, user["id"]).run()
+        stmts = [
+            env.DB.prepare(
+                "DELETE FROM session_attendance WHERE session_id IN (SELECT id FROM sessions WHERE activity_id=?)"
+            ).bind(act_id),
+            env.DB.prepare(
+                "DELETE FROM sessions WHERE activity_id=?"
+            ).bind(act_id),
+            env.DB.prepare(
+                "DELETE FROM enrollments WHERE activity_id=?"
+            ).bind(act_id),
+            env.DB.prepare(
+                "DELETE FROM activity_tags WHERE activity_id=?"
+            ).bind(act_id),
+            env.DB.prepare(
+                "DELETE FROM activities WHERE id=? AND host_id=?"
+            ).bind(act_id, user["id"]),
+        ]
+        await env.DB.batch(to_js(stmts))
     except Exception as e:
         await capture_exception(e, req, env, "api_delete_activity.delete")
         return err("Failed to delete activity — please try again", 500)
@@ -7010,6 +7075,16 @@ async def _dispatch(request, env):
         except Exception as e:
             await capture_exception(e, request, env, "presence_do_dispatch")
             return err("Failed to connect to presence channel", 500)
+
+    # WaitingRoomDO — single global instance hosts all waiting room state.
+    if path.startswith("/api/waitingroom"):
+        try:
+            do_id = env.WAITING_ROOM_DO.idFromName("global")
+            stub = env.WAITING_ROOM_DO.get(do_id)
+            return await stub.fetch(request)
+        except Exception as e:
+            await capture_exception(e, request, env, "waitingroom_do_dispatch")
+            return err("Failed to connect to waiting room service", 500)
 
     if path.startswith("/api/"):
         if path == "/api/init" and method == "POST":

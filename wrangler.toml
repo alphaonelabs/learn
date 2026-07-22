@@ -28,6 +28,10 @@ class_name = "ClassroomDO"
 name = "PRESENCE_DO"
 class_name = "PresenceDO"
 
+[[durable_objects.bindings]]
+name = "WAITING_ROOM_DO"
+class_name = "WaitingRoomDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ClassroomDO"]
@@ -35,6 +39,10 @@ new_sqlite_classes = ["ClassroomDO"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["PresenceDO"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["WaitingRoomDO"]
 
 [[r2_buckets]]
 binding = "MY_BUCKET"

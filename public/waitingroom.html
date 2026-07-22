@@ -24,7 +24,7 @@
   </div>
   <div class="nav-search">
     <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <input type="text" placeholder="What do you want to learn?"/>
+    <input type="text" aria-label="Search waiting rooms" placeholder="What do you want to learn?"/>
   </div>
   <div class="nav-icons">
     <button class="icon-btn">💬</button>
@@ -58,7 +58,7 @@
 
     <div class="section-heading">
       <h2>Open Waiting Rooms</h2>
-      <span class="count-badge" id="room-count">8</span>
+      <span class="count-badge" id="room-count">0</span>
     </div>
 
     <div class="rooms-grid" id="rooms-grid"></div>
@@ -158,6 +158,7 @@
 
 <div id="toast"></div>
 
+<script src="/js/auth.js"></script>
 <script src="/waitingroom.js"></script>
 </body>
 </html>

@@ -1,68 +1,5 @@
-function readAuthValue(key) {
-  const fromSession = sessionStorage.getItem(key);
-  if (fromSession) return fromSession;
-  const fromLocal = localStorage.getItem(key);
-  if (fromLocal) {
-    sessionStorage.setItem(key, fromLocal);
-    localStorage.removeItem(key);
-  }
-  return fromLocal;
-}
-
-function clearAuth() {
-  sessionStorage.removeItem('edu_token');
-  sessionStorage.removeItem('edu_user');
-  localStorage.removeItem('edu_token');
-  localStorage.removeItem('edu_user');
-}
-
-function authHeaders() {
-  const token = readAuthValue('edu_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function wireUserMenu() {
-  const navMenu = document.getElementById('nav-user-menu');
-  const logoutBtn = document.getElementById('logout-btn');
-  if (!navMenu || !logoutBtn) return;
-
-  function setOpen(open) {
-    navMenu.classList.toggle('open', open);
-    navMenu.setAttribute('aria-expanded', open ? 'true' : 'false');
-  }
-
-  navMenu.addEventListener('click', (event) => {
-    event.stopPropagation();
-    setOpen(!navMenu.classList.contains('open'));
-  });
-
-  navMenu.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      setOpen(!navMenu.classList.contains('open'));
-    } else if (event.key === 'Escape') {
-      setOpen(false);
-    }
-  });
-
-  logoutBtn.addEventListener('click', (event) => {
-    event.stopPropagation();
-    clearAuth();
-    window.location.href = '/login.html';
-  });
-
-  document.addEventListener('click', (event) => {
-    if (!navMenu.contains(event.target)) setOpen(false);
-  });
-}
+/* auth helpers (readAuthValue, clearAuth, authHeaders, escapeHtml, wireUserMenu)
+   are loaded from /js/auth.js — do not duplicate here. */
 
 async function fetchCourses() {
   const res = await fetch('/api/activities?type=course', { headers: authHeaders() });
@@ -90,7 +27,8 @@ function renderSessions(container, sessions, locked) {
     return `
       <div class="session">
         <p class="session-title">${title}</p>
-        <div class="session-sub">${escapeHtml(time || sub || '')}</div>
+        ${time ? `<div class="session-sub">${escapeHtml(time)}</div>` : ''}
+        ${sub ? `<div class="session-sub">${escapeHtml(sub)}</div>` : ''}
       </div>
     `;
   }).join('');

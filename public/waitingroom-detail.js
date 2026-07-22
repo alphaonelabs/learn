@@ -1,57 +1,7 @@
-function readAuthValue(key) {
-  const fromSession = sessionStorage.getItem(key);
-  if (fromSession) return fromSession;
-  const fromLocal = localStorage.getItem(key);
-  if (fromLocal) {
-    sessionStorage.setItem(key, fromLocal);
-    localStorage.removeItem(key);
-  }
-  return fromLocal;
-}
+/* auth helpers (readAuthValue, writeAuthValue, clearAuth, authHeaders,
+   escapeHtml, getUserFromToken, wireUserMenu)
+   are loaded from /js/auth.js — do not duplicate here. */
 
-function writeAuthValue(key, value) {
-  sessionStorage.setItem(key, value);
-  localStorage.removeItem(key);
-}
-
-function clearAuth() {
-  sessionStorage.removeItem('edu_token');
-  sessionStorage.removeItem('edu_user');
-  localStorage.removeItem('edu_token');
-  localStorage.removeItem('edu_user');
-}
-
-function authHeaders() {
-  const token = readAuthValue('edu_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-function getUserFromToken() {
-  const token = readAuthValue('edu_token');
-  if (!token || !token.includes('.')) return null;
-  try {
-    const payload = token.split('.')[0];
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
-    const decoded = atob(padded);
-    const user = JSON.parse(decoded);
-    if (!user || typeof user !== 'object') return null;
-    return {
-      id: String(user.id || '').trim(),
-      username: String(user.username || '').trim()
-    };
-  } catch {
-    return null;
-  }
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 function normalizeParticipant(participant) {
   if (participant && typeof participant === 'object') {
@@ -274,4 +224,5 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
 
   window.addEventListener('beforeunload', () => clearInterval(refreshInterval));
+  window.addEventListener('pagehide', () => clearInterval(refreshInterval));
 });

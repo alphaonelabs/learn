@@ -116,7 +116,11 @@
   }
   const token = readAuthValue('edu_token');
   const user  = JSON.parse(readAuthValue('edu_user') || 'null');
-  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
   function logout() { clearAuth(); window.location.href = '/login.html'; }
 
   // Nav
@@ -144,27 +148,35 @@
   async function deleteCourse() {
     if (!token) { window.location.href = '/login.html'; return; }
     if (!confirm('Delete this course and all its sessions? This cannot be undone.')) return;
-    const res = await fetch('/api/activities/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ activity_id: actId })
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || 'Failed to delete course');
-    window.location.href = '/courses.html';
+    try {
+      const res = await fetch('/api/activities/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ activity_id: actId })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Failed to delete course');
+      window.location.href = '/courses.html';
+    } catch (e) {
+      alert(e.message || 'Failed to delete course');
+    }
   }
 
   async function deleteSession(sessionId) {
     if (!token) { window.location.href = '/login.html'; return; }
     if (!confirm('Delete this session?')) return;
-    const res = await fetch('/api/sessions/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ session_id: sessionId })
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || 'Failed to delete session');
-    await loadActivity();
+    try {
+      const res = await fetch('/api/sessions/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Failed to delete session');
+      await loadActivity();
+    } catch (e) {
+      alert(e.message || 'Failed to delete session');
+    }
   }
 
   async function loadActivity() {

@@ -83,7 +83,7 @@
     </div>
     <div class="nav-search">
       <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-      <input type="text" placeholder="What do you want to learn?"/>
+      <input type="text" aria-label="Search courses" placeholder="What do you want to learn?"/>
     </div>
     <div class="nav-icons">
       <button class="icon-btn" type="button">💬</button>
@@ -113,8 +113,9 @@
           <input id="title" type="text" placeholder="Enter your course title" required />
         </div>
         <div class="group">
-          <label for="image">Course image</label>
-          <input id="image" class="file-input" type="file" accept="image/*" />
+          <label for="image">Course image <span style="color:#9ca3af;font-weight:400">(not yet supported)</span></label>
+          <input id="image" class="file-input" type="file" accept="image/*" disabled aria-disabled="true" />
+          <div class="hint">Image upload is not available yet.</div>
         </div>
         <div class="group">
           <label for="description">Course Description</label>
@@ -158,6 +159,7 @@
       </form>
     </div>
   </div>
+  <script src="/js/auth.js"></script>
   <script src="/teach-course.js"></script>
 </body>
 </html>
