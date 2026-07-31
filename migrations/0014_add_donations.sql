@@ -1,4 +1,4 @@
--- Migration 0008: Add donations support
+-- Migration 0014: Add donations support
 
 CREATE TABLE IF NOT EXISTS donations (
     id                       TEXT PRIMARY KEY,
@@ -21,3 +21,4 @@ CREATE TABLE IF NOT EXISTS donations (
 CREATE INDEX IF NOT EXISTS idx_donations_created_at ON donations(created_at);
 CREATE INDEX IF NOT EXISTS idx_donations_status     ON donations(status);
 CREATE INDEX IF NOT EXISTS idx_donations_user_id    ON donations(user_id);
+CREATE INDEX IF NOT EXISTS idx_donations_status_created_at ON donations(status, created_at);

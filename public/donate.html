@@ -31,7 +31,7 @@
             <label class="flex-1 cursor-pointer focus-within:ring-2 focus-within:ring-orange-500 focus-within:ring-inset">
               <input type="radio" name="donation_type" value="one-time" class="sr-only" checked
                      onchange="onTypeChange('one-time')">
-              <span id="tab-one-time" aria-hidden="true"
+              <span id="tab-one-time"
                     class="flex items-center justify-center py-2.5 text-sm font-semibold transition-colors bg-orange-600 text-white">
                 One-time
               </span>
@@ -39,7 +39,7 @@
             <label class="flex-1 cursor-pointer focus-within:ring-2 focus-within:ring-orange-500 focus-within:ring-inset">
               <input type="radio" name="donation_type" value="monthly" class="sr-only"
                      onchange="onTypeChange('monthly')">
-              <span id="tab-monthly" aria-hidden="true"
+              <span id="tab-monthly"
                     class="flex items-center justify-center py-2.5 text-sm font-semibold transition-colors bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600">
                 Monthly
               </span>
@@ -93,6 +93,16 @@
           <p id="amount-error" role="alert" aria-live="polite" class="hidden mt-1 text-xs text-red-500 dark:text-red-400"></p>
         </div>
 
+        <!-- Name -->
+        <div class="mb-5">
+          <label for="donor-name" class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+            Name <span class="font-normal text-gray-400 dark:text-gray-500">(Optional)</span>
+          </label>
+          <input id="donor-name" type="text" maxlength="120" autocomplete="name"
+                 placeholder="Your name"
+                 class="w-full px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm">
+        </div>
+
         <!-- Email -->
         <div class="mb-5">
           <label for="donor-email" class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
@@ -133,7 +143,7 @@
         <!-- Submit -->
         <button id="submit-btn" type="submit"
                 class="w-full flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-xl transition-colors text-base">
-          <i class="fas fa-heart" id="submit-icon"></i>
+          <i class="fas fa-heart" id="submit-icon" aria-hidden="true"></i>
           <span id="submit-label">Donate Now</span>
         </button>
       </form>
@@ -148,13 +158,13 @@
         <div id="payment-element" class="mb-5"></div>
 
         <p id="payment-message" class="hidden mb-4 text-sm text-red-600 dark:text-red-400 flex items-center gap-1">
-          <i class="fas fa-exclamation-circle shrink-0"></i>
+          <i class="fas fa-exclamation-circle shrink-0" aria-hidden="true"></i>
           <span id="payment-message-text"></span>
         </p>
 
         <button id="confirm-btn" type="button" onclick="confirmPayment()"
                 class="w-full flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-xl transition-colors text-base">
-          <i class="fas fa-lock" id="confirm-icon"></i>
+          <i class="fas fa-lock" id="confirm-icon" aria-hidden="true"></i>
           <span id="confirm-label">Complete Donation</span>
         </button>
 
@@ -167,7 +177,7 @@
       <!-- SUCCESS STATE (shown after Stripe redirect) -->
       <div id="success-step" class="hidden text-center py-6">
         <div class="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-          <i class="fas fa-check text-2xl text-green-600 dark:text-green-400"></i>
+          <i class="fas fa-check text-2xl text-green-600 dark:text-green-400" aria-hidden="true"></i>
         </div>
         <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">Thank You!</h3>
         <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
@@ -175,7 +185,7 @@
         </p>
         <button type="button" onclick="resetToForm()"
                 class="inline-flex items-center gap-2 text-sm font-medium text-orange-600 dark:text-orange-400 hover:underline">
-          <i class="fas fa-heart"></i> Make another donation
+          <i class="fas fa-heart" aria-hidden="true"></i> Make another donation
         </button>
       </div>
     </div>
@@ -187,19 +197,19 @@
         <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-3">Why Donate?</h2>
         <ul class="space-y-2 mb-4">
           <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0"></i>
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
             Provide scholarships to students in need
           </li>
           <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0"></i>
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
             Develop new educational content and resources
           </li>
           <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0"></i>
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
             Improve our platform and technology
           </li>
           <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0"></i>
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
             Expand our reach to underserved communities
           </li>
         </ul>
@@ -213,19 +223,19 @@
         <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Monthly donations provide sustainable support that helps us:</p>
         <ul class="space-y-2 mb-4">
           <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0"></i>
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
             Plan long-term educational programs
           </li>
           <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0"></i>
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
             Maintain consistent support for students
           </li>
           <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0"></i>
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
             Develop new educational resources continuously
           </li>
           <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0"></i>
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
             Make long-term commitments to communities
           </li>
         </ul>
@@ -469,6 +479,7 @@
         headers,
         body: JSON.stringify({
           amount:        selectedAmount,
+          name:          document.getElementById('donor-name').value.trim(),
           email:         document.getElementById('donor-email').value.trim(),
           message:       document.getElementById('donor-message').value.trim(),
           anonymous:     document.getElementById('anonymous-toggle').checked,
