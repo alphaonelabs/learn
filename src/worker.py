@@ -1413,6 +1413,26 @@ async def init_db(env):
         )""",
         "CREATE INDEX IF NOT EXISTS idx_survey_answers_response ON survey_answers(response_id)",
         "CREATE INDEX IF NOT EXISTS idx_survey_answers_question ON survey_answers(question_id)",
+        """CREATE TABLE IF NOT EXISTS donations (
+            id                       TEXT PRIMARY KEY,
+            user_id                  TEXT,
+            amount                   INTEGER NOT NULL,
+            currency                 TEXT NOT NULL DEFAULT 'usd',
+            donation_type            TEXT NOT NULL DEFAULT 'one-time',
+            donor_name               TEXT,
+            donor_email              TEXT,
+            message                  TEXT,
+            anonymous                INTEGER NOT NULL DEFAULT 0,
+            status                   TEXT NOT NULL DEFAULT 'pending',
+            stripe_payment_intent_id TEXT,
+            stripe_subscription_id   TEXT,
+            stripe_customer_id       TEXT,
+            created_at               TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_donations_created_at ON donations(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_donations_status ON donations(status)",
+        "CREATE INDEX IF NOT EXISTS idx_donations_user_id ON donations(user_id)",
     ]
     for sql in legacy_tables:
         await env.DB.prepare(sql).run()
@@ -4507,65 +4527,6 @@ async def api_features(req, env):
     })
 
 
-async def api_create_donation_checkout(req, env):
-    user = verify_token(req.headers.get("Authorization") or "", env.JWT_SECRET)
-    body, bad_resp = await parse_json_object(req)
-    if bad_resp:
-        return bad_resp
-
-    try:
-        amount_cents = int(body.get("amount_cents") or 0)
-    except Exception:
-        amount_cents = 0
-    if amount_cents < 100:
-        return err("Donation amount must be at least $1.00")
-    if amount_cents > 1000000:
-        return err("Donation amount is too large")
-
-    message = _legacy_text(body.get("message"))[:500]
-    email = _legacy_text(body.get("email")).strip()[:180]
-    origin = f"{urlparse(req.url).scheme}://{urlparse(req.url).netloc}"
-    fields = {
-        "mode": "payment",
-        "success_url": origin + "/checkout-success?donation=1&session_id={CHECKOUT_SESSION_ID}",
-        "cancel_url": origin + "/donate",
-        "line_items[0][quantity]": 1,
-        "line_items[0][price_data][currency]": "usd",
-        "line_items[0][price_data][unit_amount]": amount_cents,
-        "line_items[0][price_data][product_data][name]": "Alpha One Labs donation",
-        "metadata[kind]": "donation",
-    }
-    if user:
-        fields["metadata[user_id]"] = user["id"]
-    if email and "@" in email:
-        fields["customer_email"] = email
-
-    try:
-        session = await _stripe_form_request(env, "/checkout/sessions", fields)
-        session_id = session.get("id", "")
-        await env.DB.prepare(
-            "INSERT INTO donation_checkout_sessions"
-            " (id,user_id,stripe_session_id,status,amount_total,currency,message)"
-            " VALUES (?,?,?,?,?,?,?)"
-            " ON CONFLICT(stripe_session_id) DO UPDATE SET status=excluded.status,amount_total=excluded.amount_total"
-        ).bind(
-            new_id(),
-            user["id"] if user else None,
-            session_id,
-            "pending",
-            amount_cents,
-            "USD",
-            await encrypt_aes(message, env.ENCRYPTION_KEY) if message else "",
-        ).run()
-        return ok({
-            "checkout_url": session.get("url", ""),
-            "session_id": session_id,
-        }, "Donation checkout created")
-    except Exception as exc:
-        await capture_exception(exc, req, env, "api_create_donation_checkout")
-        return err("Could not create donation checkout", 500)
-
-
 async def serve_r2_media(path: str, env):
     bucket = getattr(env, "MY_BUCKET", None)
     if not bucket:
@@ -7631,9 +7592,6 @@ async def _dispatch(request, env):
 
         if path in ("/api/features", "/api/legacy-features") and method == "GET":
             return await api_features(request, env)
-
-        if path == "/api/donations/checkout" and method == "POST":
-            return await api_create_donation_checkout(request, env)
 
         if path == "/api/admin/table-counts" and method == "GET":
             return await api_admin_table_counts(request, env)
