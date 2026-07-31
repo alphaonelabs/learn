@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Waiting Rooms — Alpha One Labs</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/waitingroom.css"/>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">
+    <img class="nav-logo-box" alt="Alpha One Labs logo" src="/images/logo.png"/>
+    Alpha One Labs
+  </a>
+  <div class="nav-links">
+    <a href="#">LEARN ▾</a>
+    <a href="/courses.html">COURSES</a>
+    <a href="#">COMMUNITY ▾</a>
+    <a href="#">RESOURCES ▾</a>
+    <a href="#">ABOUT ▾</a>
+  </div>
+  <div class="nav-search">
+    <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="text" aria-label="Search waiting rooms" placeholder="What do you want to learn?"/>
+  </div>
+  <div class="nav-icons">
+    <button class="icon-btn">💬</button>
+    <button class="icon-btn" style="position:relative">🛒<span class="cart-badge">1</span></button>
+    <button class="icon-btn">🔔</button>
+    <button class="icon-btn">🌐</button>
+    <button class="icon-btn">🌙</button>
+  </div>
+  <div class="nav-user" id="nav-user-menu" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false">
+    <div class="avatar-nav" id="nav-avatar">L</div>
+    <span id="nav-uname">lakshya</span> ▾
+    <div class="nav-user-dropdown" id="nav-user-dropdown">
+      <button type="button" id="logout-btn">Logout</button>
+    </div>
+  </div>
+</nav>
+
+<!-- PAGE -->
+<div class="page">
+  <div class="page-inner">
+
+    <div class="page-header">
+      <h1>Waiting Rooms</h1>
+      <button type="button" class="btn-create">Create Learning Request</button>
+    </div>
+
+    <div class="explainer">
+      <h2>What are Waiting Rooms?</h2>
+      <p>Waiting rooms allow you to express interest in subjects and topics you want to learn. Join existing waiting rooms or create your own to find others interested in the same topics. Teachers can see these waiting rooms and create courses based on popular demand.</p>
+    </div>
+
+    <div class="section-heading">
+      <h2>Open Waiting Rooms</h2>
+      <span class="count-badge" id="room-count">0</span>
+    </div>
+
+    <div class="rooms-grid" id="rooms-grid"></div>
+
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-grid">
+      <div class="footer-col">
+        <h3>LEARNING</h3>
+        <a href="#">📊 Courses</a>
+        <a href="#">📋 Subjects</a>
+        <a href="#">❓ Quizzes</a>
+        <a href="#">🎬 Videos</a>
+        <a href="#">🏆 Challenges</a>
+        <a href="#">👥 Study Groups</a>
+      </div>
+      <div class="footer-col">
+        <h3>COMMUNITY</h3>
+        <a href="#">💬 Forum</a>
+        <a href="#">📝 Blog</a>
+        <a href="#">⭐ Features</a>
+        <a href="#">🎖️ Success Stories</a>
+      </div>
+      <div class="footer-col">
+        <h3>RESOURCES &amp; INFO</h3>
+        <a href="#">🧪 Virtual Lab</a>
+        <a href="#">💻 GSOC'26</a>
+        <a href="#">📈 Status</a>
+        <a href="#">💡 Feedback</a>
+        <a href="#">📄 Terms</a>
+      </div>
+      <div class="footer-col">
+        <h3>CONNECT WITH US</h3>
+        <div class="social-row">
+          <a href="#" class="s-link" title="Twitter/X">𝕏</a>
+          <a href="#" class="s-link" title="Discord">💬</a>
+          <a href="#" class="s-link" title="Instagram">📷</a>
+          <a href="#" class="s-link" title="Facebook">f</a>
+          <a href="#" class="s-link" title="YouTube">▶</a>
+          <a href="#" class="s-link" title="GitHub">⌘</a>
+        </div>
+        <p class="newsletter-label">SUBSCRIBE TO NEWSLETTER</p>
+        <div class="newsletter">
+          <input type="email" placeholder="Your email"/>
+          <button>➤</button>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div>
+        <p>© 2026 Alpha One Labs. All rights reserved.</p>
+      </div>
+      <div class="footer-links">
+        <a href="#">About Us</a>
+        <a href="#">Terms &amp; Conditions</a>
+        <a href="#">Privacy Policy</a>
+        <a href="#">Cookie Policy</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2>Create Learning Request</h2>
+    <div class="form-group">
+      <label>Topic Title *</label>
+      <input id="f-title" type="text" placeholder="e.g. Introduction to Rust Systems Programming"/>
+    </div>
+    <div class="form-group">
+      <label>Subject</label>
+      <select id="f-subject">
+        <option>Programming</option><option>Mathematics</option><option>Music</option>
+        <option>Science</option><option>Building</option><option>Design</option>
+        <option>Language</option><option>Other</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Description</label>
+      <textarea id="f-desc" placeholder="Describe what you want to learn…"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Tags <span style="color:#9ca3af;font-weight:400">(comma separated)</span></label>
+      <input id="f-tags" type="text" placeholder="Python, Django, REST API"/>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn-cancel">Cancel</button>
+      <button type="button" class="btn-submit">Create Room</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/js/auth.js"></script>
+<script src="/waitingroom.js"></script>
+</body>
+</html>
