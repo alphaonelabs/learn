@@ -1,98 +1,709 @@
 {% extends "base.html" %}
 {% block title %}Donate - Alpha One Labs{% endblock %}
-{% block meta_description %}Alpha One Labs - Activity Platform{% endblock %}
-{% block body_class %}min-h-screen flex flex-col bg-white text-gray-900 dark:bg-black dark:text-gray-100{% endblock %}
+{% block meta_description %}Support Alpha One Labs — your donation helps expand educational opportunities worldwide.{% endblock %}
+{% block head %}
+<script src="https://js.stripe.com/v3/"></script>
+{% endblock %}
 {% block content %}
 <main class="flex-1">
-    <section class="bg-gradient-to-br from-amber-500 via-orange-600 to-rose-700 text-white py-16">
-      <div class="max-w-5xl mx-auto px-4 md:px-6">
-        <p class="text-sm font-bold uppercase tracking-[0.2em] text-orange-100 mb-3">Support Alpha One Labs</p>
-        <h1 class="text-4xl md:text-6xl font-extrabold mb-4">Fund accessible learning.</h1>
-        <p class="max-w-2xl text-orange-50 text-lg">
-          Donations use the same Stripe-backed payment system as activity checkout and help us keep learning programs available.
-        </p>
-      </div>
-    </section>
+  <section class="bg-gradient-to-br from-amber-500 via-orange-600 to-rose-700 text-white py-16">
+    <div class="max-w-5xl mx-auto px-4 md:px-6">
+      <p class="text-sm font-bold uppercase tracking-[0.2em] text-orange-100 mb-3">Support Alpha One Labs</p>
+      <h1 class="text-4xl md:text-6xl font-extrabold mb-4">Fund accessible learning.</h1>
+      <p class="max-w-2xl text-orange-50 text-lg">
+        Your donation helps us provide quality education to more students around the world.
+      </p>
+    </div>
+  </section>
 
-    <section class="max-w-5xl mx-auto px-4 md:px-6 py-12 grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <form id="donation-form" class="lg:col-span-2 rounded-3xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl p-6 space-y-5">
-        <div>
-          <label class="block text-sm font-bold mb-2" for="amount">Donation amount</label>
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-            <button type="button" data-amount="1000" class="preset rounded-xl border border-orange-200 dark:border-orange-800 px-4 py-3 font-bold hover:bg-orange-50 dark:hover:bg-orange-900/20">$10</button>
-            <button type="button" data-amount="2500" class="preset rounded-xl border border-orange-200 dark:border-orange-800 px-4 py-3 font-bold hover:bg-orange-50 dark:hover:bg-orange-900/20">$25</button>
-            <button type="button" data-amount="5000" class="preset rounded-xl border border-orange-200 dark:border-orange-800 px-4 py-3 font-bold hover:bg-orange-50 dark:hover:bg-orange-900/20">$50</button>
-            <button type="button" data-amount="10000" class="preset rounded-xl border border-orange-200 dark:border-orange-800 px-4 py-3 font-bold hover:bg-orange-50 dark:hover:bg-orange-900/20">$100</button>
+  <div class="max-w-5xl mx-auto px-4 md:px-6 py-12 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+
+    <!-- LEFT — DONATION FORM -->
+    <div class="lg:col-span-2 rounded-3xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl p-6 sm:p-8 lg:sticky lg:top-6">
+      <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Make a Donation</h2>
+
+      <form id="donate-form" novalidate>
+
+        <!-- Donation Type -->
+        <fieldset class="mb-6">
+          <legend class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Donation Type</legend>
+          <div class="flex rounded-xl overflow-hidden border border-gray-300 dark:border-gray-600" role="group">
+            <label class="flex-1 cursor-pointer focus-within:ring-2 focus-within:ring-orange-500 focus-within:ring-inset">
+              <input type="radio" name="donation_type" value="one-time" class="sr-only" checked
+                     onchange="onTypeChange('one-time')">
+              <span id="tab-one-time"
+                    class="flex items-center justify-center py-2.5 text-sm font-semibold transition-colors bg-orange-600 text-white">
+                One-time
+              </span>
+            </label>
+            <label class="flex-1 cursor-pointer focus-within:ring-2 focus-within:ring-orange-500 focus-within:ring-inset">
+              <input type="radio" name="donation_type" value="monthly" class="sr-only"
+                     onchange="onTypeChange('monthly')">
+              <span id="tab-monthly"
+                    class="flex items-center justify-center py-2.5 text-sm font-semibold transition-colors bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600">
+                Monthly
+              </span>
+            </label>
           </div>
-          <input id="amount" type="number" min="1" step="1" value="25" required class="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-500" />
+          <p id="type-description" class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            Support our mission with a one-time donation
+          </p>
+        </fieldset>
+
+        <!-- Preset Amounts -->
+        <div class="mb-5" role="group" aria-label="Select a preset donation amount">
+          <span class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Select Amount</span>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" data-amount="5" aria-pressed="false"
+                    class="amount-btn px-5 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 text-sm font-bold text-gray-700 dark:text-gray-300 hover:border-orange-500 dark:hover:border-orange-400 transition-colors">
+              $5
+            </button>
+            <button type="button" data-amount="10" aria-pressed="false"
+                    class="amount-btn px-5 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 text-sm font-bold text-gray-700 dark:text-gray-300 hover:border-orange-500 dark:hover:border-orange-400 transition-colors">
+              $10
+            </button>
+            <button type="button" data-amount="25" aria-pressed="false"
+                    class="amount-btn px-5 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 text-sm font-bold text-gray-700 dark:text-gray-300 hover:border-orange-500 dark:hover:border-orange-400 transition-colors">
+              $25
+            </button>
+            <button type="button" data-amount="50" aria-pressed="false"
+                    class="amount-btn px-5 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 text-sm font-bold text-gray-700 dark:text-gray-300 hover:border-orange-500 dark:hover:border-orange-400 transition-colors">
+              $50
+            </button>
+            <button type="button" data-amount="100" aria-pressed="false"
+                    class="amount-btn px-5 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 text-sm font-bold text-gray-700 dark:text-gray-300 hover:border-orange-500 dark:hover:border-orange-400 transition-colors">
+              $100
+            </button>
+          </div>
         </div>
 
-        <div>
-          <label class="block text-sm font-bold mb-2" for="email">Email for Stripe receipt</label>
-          <input id="email" type="email" class="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-500" placeholder="you@example.com" />
+        <!-- Custom Amount -->
+        <div class="mb-5">
+          <label for="custom-amount" class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+            Or enter custom amount
+          </label>
+          <div class="relative max-w-xs">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 font-semibold pointer-events-none select-none">$</span>
+            <input id="custom-amount" type="number" min="1" max="10000" step="0.01"
+                   placeholder="0.00"
+                   aria-describedby="amount-error" aria-invalid="false"
+                   class="w-full pl-7 pr-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm"
+                   oninput="onCustomAmount(this)">
+          </div>
+          <p id="amount-error" role="alert" aria-live="polite" class="hidden mt-1 text-xs text-red-500 dark:text-red-400"></p>
         </div>
 
-        <div>
-          <label class="block text-sm font-bold mb-2" for="message">Message</label>
-          <textarea id="message-text" rows="4" class="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-500" placeholder="Optional note for the team"></textarea>
+        <!-- Name -->
+        <div class="mb-5">
+          <label for="donor-name" class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+            Name <span class="font-normal text-gray-400 dark:text-gray-500">(Optional)</span>
+          </label>
+          <input id="donor-name" type="text" maxlength="120" autocomplete="name"
+                 placeholder="Your name"
+                 class="w-full px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm">
         </div>
 
-        <button id="donate-btn" type="submit" class="w-full rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-4 shadow-lg">
-          <i class="fas fa-credit-card mr-2"></i>Donate with Stripe
+        <!-- Email -->
+        <div class="mb-5">
+          <label for="donor-email" class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+            Email
+          </label>
+          <input id="donor-email" type="email" required autocomplete="email"
+                 placeholder="you@example.com"
+                 aria-describedby="email-error" aria-invalid="false"
+                 class="w-full px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm">
+          <p id="email-error" role="alert" aria-live="polite" class="hidden mt-1 text-xs text-red-500 dark:text-red-400"></p>
+        </div>
+
+        <!-- Message -->
+        <div class="mb-5">
+          <label for="donor-message" class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+            Message <span class="font-normal text-gray-400 dark:text-gray-500">(Optional)</span>
+          </label>
+          <textarea id="donor-message" rows="3" maxlength="500"
+                    placeholder="Share why you're donating..."
+                    class="w-full px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm resize-none"></textarea>
+        </div>
+
+        <!-- Anonymous -->
+        <div class="mb-6">
+          <label class="flex items-center gap-3 cursor-pointer select-none">
+            <input id="anonymous-toggle" type="checkbox" class="w-4 h-4 accent-orange-600 cursor-pointer"
+                   onchange="updateSummary()">
+            <span class="text-sm text-gray-700 dark:text-gray-300">Make my donation anonymous</span>
+          </label>
+        </div>
+
+        <!-- Final Amount Summary -->
+        <div class="mb-6 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">Final Donation Amount:</span>
+          <span id="summary-amount" class="text-xl font-extrabold text-orange-600 dark:text-orange-400">$0.00</span>
+        </div>
+
+        <!-- Submit -->
+        <button id="submit-btn" type="submit"
+                class="w-full flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-xl transition-colors text-base">
+          <i class="fas fa-heart" id="submit-icon" aria-hidden="true"></i>
+          <span id="submit-label">Donate Now</span>
         </button>
-        <p id="donation-message" class="hidden rounded-xl p-3 text-sm"></p>
       </form>
 
-      <aside class="rounded-3xl border border-gray-200 dark:border-gray-700 bg-orange-50 dark:bg-orange-900/20 p-6 h-fit">
-        <h2 class="text-xl font-extrabold mb-3">Donation records</h2>
-        <p class="text-sm text-gray-700 dark:text-gray-300 mb-4">
-          Donation records are available in the feature hub for authenticated users.
+      <!-- STEP 2 — Stripe Payment Element -->
+      <div id="payment-step" class="hidden">
+        <div class="mb-5 p-4 bg-orange-50 dark:bg-orange-900/20 rounded-xl border border-orange-200 dark:border-orange-800 flex items-center justify-between">
+          <span id="pay-summary-label" class="text-sm font-medium text-orange-700 dark:text-orange-300"></span>
+          <span id="pay-summary-amount" class="text-lg font-extrabold text-orange-700 dark:text-orange-400"></span>
+        </div>
+
+        <div id="payment-element" class="mb-5"></div>
+
+        <p id="payment-message" class="hidden mb-4 text-sm text-red-600 dark:text-red-400 flex items-center gap-1">
+          <i class="fas fa-exclamation-circle shrink-0" aria-hidden="true"></i>
+          <span id="payment-message-text"></span>
         </p>
-        <a href="/features?group=donations" class="inline-flex items-center gap-2 text-orange-700 dark:text-orange-300 font-bold hover:underline">
-          View donations <i class="fas fa-arrow-right"></i>
-        </a>
-      </aside>
-    </section>
-  </main>
+
+        <button id="confirm-btn" type="button" onclick="confirmPayment()"
+                class="w-full flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-xl transition-colors text-base">
+          <i class="fas fa-lock" id="confirm-icon" aria-hidden="true"></i>
+          <span id="confirm-label">Complete Donation</span>
+        </button>
+
+        <button type="button" onclick="backToForm()"
+                class="mt-3 w-full text-sm text-center text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors py-1">
+          ← Back to donation details
+        </button>
+      </div>
+
+      <!-- SUCCESS STATE (shown after Stripe redirect) -->
+      <div id="success-step" class="hidden text-center py-6">
+        <div class="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+          <i class="fas fa-check text-2xl text-green-600 dark:text-green-400" aria-hidden="true"></i>
+        </div>
+        <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">Thank You!</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
+          Your donation was received. A thank-you email is on its way.
+        </p>
+        <button type="button" onclick="resetToForm()"
+                class="inline-flex items-center gap-2 text-sm font-medium text-orange-600 dark:text-orange-400 hover:underline">
+          <i class="fas fa-heart" aria-hidden="true"></i> Make another donation
+        </button>
+      </div>
+    </div>
+
+    <!-- RIGHT — INFO PANELS -->
+    <div class="space-y-6">
+
+      <div class="rounded-3xl border border-gray-200 dark:border-gray-700 bg-orange-50 dark:bg-orange-900/20 p-6">
+        <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-3">Why Donate?</h2>
+        <ul class="space-y-2 mb-4">
+          <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
+            Provide scholarships to students in need
+          </li>
+          <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
+            Develop new educational content and resources
+          </li>
+          <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
+            Improve our platform and technology
+          </li>
+          <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
+            Expand our reach to underserved communities
+          </li>
+        </ul>
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          We're committed to making quality education accessible to everyone, regardless of their financial situation.
+        </p>
+      </div>
+
+      <div class="rounded-3xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
+        <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-3">Why Donate Monthly?</h2>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Monthly donations provide sustainable support that helps us:</p>
+        <ul class="space-y-2 mb-4">
+          <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
+            Plan long-term educational programs
+          </li>
+          <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
+            Maintain consistent support for students
+          </li>
+          <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
+            Develop new educational resources continuously
+          </li>
+          <li class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <i class="fas fa-check text-orange-500 mt-0.5 shrink-0" aria-hidden="true"></i>
+            Make long-term commitments to communities
+          </li>
+        </ul>
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          Your monthly support creates a foundation for sustainable education.
+        </p>
+      </div>
+
+      <div class="rounded-3xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-center">
+        <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-1">Community Impact</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Total donations so far</p>
+        <div id="stat-total" class="text-4xl font-extrabold text-orange-600 dark:text-orange-400 mb-4">
+          <span class="animate-pulse text-gray-300 dark:text-gray-600">—</span>
+        </div>
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          Thank you to all our generous donors who make our mission possible!
+        </p>
+      </div>
+
+      <div class="rounded-3xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
+        <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">Recent Donations</h2>
+
+        <div id="donations-skeleton" class="space-y-3">
+          <div class="animate-pulse h-20 rounded-xl bg-gray-100 dark:bg-gray-700"></div>
+          <div class="animate-pulse h-20 rounded-xl bg-gray-100 dark:bg-gray-700"></div>
+        </div>
+
+        <div id="donations-list" class="hidden space-y-3"></div>
+
+        <div id="donations-empty" class="hidden text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
+          No donations yet. Be the first to support our mission!
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</main>
+
+<!-- Toast container -->
+<div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none max-w-sm w-full"></div>
+{% endblock %}
+
+{% block scripts %}
 <script>
-    const token = localStorage.getItem('edu_token');
-    function showMessage(message, isError) {
-      const el = document.getElementById('donation-message');
-      el.textContent = message;
-      el.className = 'rounded-xl p-3 text-sm ' + (isError ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300' : 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300');
-      el.classList.remove('hidden');
-    }
-    document.querySelectorAll('.preset').forEach(button => {
-      button.addEventListener('click', () => {
-        document.getElementById('amount').value = String(Number(button.dataset.amount || 0) / 100);
+  const API = '';
+
+  // State
+  let selectedAmount = 0;
+  let selectedType   = 'one-time';
+  let stripeInstance = null;   // Stripe(publishableKey)
+  let stripeElements = null;   // stripe.elements({clientSecret})
+  let paymentElement = null;   // elements.create('payment')
+
+  const TYPE_DESC = {
+    'one-time': 'Support our mission with a one-time donation',
+    'monthly':  'Support our mission with a recurring monthly donation',
+  };
+
+  // Toast
+  function showToast(msg, type = 'info') {
+    const styles = {
+      success: 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300',
+      error:   'bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300',
+      info:    'bg-orange-50 dark:bg-orange-900/30 border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-300',
+    };
+    const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', info: 'fa-info-circle' };
+    const el = document.createElement('div');
+    el.className = `pointer-events-auto rounded-xl border px-4 py-3 text-sm flex items-start gap-2 shadow-lg ${styles[type] || styles.info}`;
+    el.setAttribute('role', 'alert');
+    const icon = document.createElement('i');
+    icon.className = `fas ${icons[type] || icons.info} mt-0.5 shrink-0`;
+    icon.setAttribute('aria-hidden', 'true');
+    const textNode = document.createElement('span');
+    textNode.textContent = msg;
+    el.appendChild(icon);
+    el.appendChild(textNode);
+    document.getElementById('toast-container').appendChild(el);
+    setTimeout(() => { el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),350); }, 4000);
+  }
+
+  // Donation type toggle
+  function onTypeChange(value) {
+    selectedType = value;
+    const active   = 'flex items-center justify-center py-2.5 text-sm font-semibold transition-colors bg-orange-600 text-white';
+    const inactive = 'flex items-center justify-center py-2.5 text-sm font-semibold transition-colors bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600';
+    document.getElementById('tab-one-time').className = value === 'one-time' ? active : inactive;
+    document.getElementById('tab-monthly').className  = value === 'monthly'  ? active : inactive;
+    document.getElementById('type-description').textContent = TYPE_DESC[value];
+    updateSummary();
+  }
+
+  // Amount preset buttons
+  const ACTIVE_BTN   = 'amount-btn px-5 py-2 rounded-lg border-2 border-orange-500 bg-orange-600 text-white text-sm font-bold transition-colors';
+  const INACTIVE_BTN = 'amount-btn px-5 py-2 rounded-lg border-2 border-gray-300 dark:border-gray-600 text-sm font-bold text-gray-700 dark:text-gray-300 hover:border-orange-500 dark:hover:border-orange-400 transition-colors';
+
+  document.querySelectorAll('.amount-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.amount-btn').forEach(b => {
+        b.className = INACTIVE_BTN;
+        b.setAttribute('aria-pressed', 'false');
       });
+      btn.className = ACTIVE_BTN;
+      btn.setAttribute('aria-pressed', 'true');
+      selectedAmount = parseFloat(btn.dataset.amount);
+      const customInput = document.getElementById('custom-amount');
+      customInput.value = '';
+      customInput.setAttribute('aria-invalid', 'false');
+      document.getElementById('amount-error').classList.add('hidden');
+      updateSummary();
     });
-    document.getElementById('donation-form').addEventListener('submit', async event => {
-      event.preventDefault();
-      const btn = document.getElementById('donate-btn');
-      btn.disabled = true;
-      btn.textContent = 'Creating checkout...';
-      const amount = Math.round(Number(document.getElementById('amount').value || 0) * 100);
-      try {
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers.Authorization = 'Bearer ' + token;
-        const res = await fetch('/api/donations/checkout', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            amount_cents: amount,
-            email: document.getElementById('email').value,
-            message: document.getElementById('message-text').value
-          })
-        });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error || 'Could not create donation checkout');
-        window.location.href = body.data.checkout_url;
-      } catch (err) {
-        showMessage(err.message, true);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-credit-card mr-2"></i>Donate with Stripe';
+  });
+
+  function onCustomAmount(input) {
+    document.querySelectorAll('.amount-btn').forEach(b => {
+      b.className = INACTIVE_BTN;
+      b.setAttribute('aria-pressed', 'false');
+    });
+    selectedAmount = input.value ? parseFloat(input.value) : 0;
+    input.setAttribute('aria-invalid', 'false');
+    document.getElementById('amount-error').classList.add('hidden');
+    updateSummary();
+  }
+
+  function updateSummary() {
+    document.getElementById('summary-amount').textContent =
+      selectedAmount > 0 ? `$${selectedAmount.toFixed(2)}` : '$0.00';
+  }
+
+  // Step navigation
+  function showStep(step) {
+    document.getElementById('donate-form').classList.toggle('hidden', step !== 1);
+    document.getElementById('payment-step').classList.toggle('hidden', step !== 2);
+    document.getElementById('success-step').classList.toggle('hidden', step !== 3);
+  }
+
+  function backToForm() {
+    // Unmount the Payment Element so it can be re-mounted fresh next time
+    if (paymentElement) { paymentElement.destroy(); paymentElement = null; }
+    stripeElements = null;
+    clearPaymentError();
+    showStep(1);
+  }
+
+  function resetToForm() {
+    document.getElementById('donate-form').reset();
+    document.querySelectorAll('.amount-btn').forEach(b => {
+      b.className = INACTIVE_BTN;
+      b.setAttribute('aria-pressed', 'false');
+    });
+    selectedAmount = 0;
+    // form.reset() restores radio DOM to one-time, but JS state and tab UI
+    // can still reflect the previous type — reset explicitly.
+    onTypeChange('one-time');
+    history.replaceState({}, '', window.location.pathname);
+    backToForm();
+  }
+
+  function clearPaymentError() {
+    const msg = document.getElementById('payment-message');
+    msg.classList.add('hidden');
+    document.getElementById('payment-message-text').textContent = '';
+  }
+
+  function showPaymentError(text) {
+    const msg = document.getElementById('payment-message');
+    document.getElementById('payment-message-text').textContent = text;
+    msg.classList.remove('hidden');
+  }
+
+  // Form validation
+  function validateForm() {
+    let valid = true;
+    const amountInput = document.getElementById('custom-amount');
+    const amountErr   = document.getElementById('amount-error');
+
+    if (!selectedAmount || selectedAmount <= 0) {
+      amountErr.textContent = 'Please select or enter an amount.';
+      amountErr.classList.remove('hidden');
+      amountInput.setAttribute('aria-invalid', 'true');
+      valid = false;
+    } else if (selectedAmount < 1) {
+      amountErr.textContent = 'Minimum donation is $1.00.';
+      amountErr.classList.remove('hidden');
+      amountInput.setAttribute('aria-invalid', 'true');
+      valid = false;
+    } else if (selectedAmount > 10000) {
+      amountErr.textContent = 'Maximum donation is $10,000.00.';
+      amountErr.classList.remove('hidden');
+      amountInput.setAttribute('aria-invalid', 'true');
+      valid = false;
+    } else {
+      amountErr.classList.add('hidden');
+      amountInput.setAttribute('aria-invalid', 'false');
+    }
+
+    const emailInput = document.getElementById('donor-email');
+    const email      = emailInput.value.trim();
+    const emailErr   = document.getElementById('email-error');
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      emailErr.textContent = 'Please enter a valid email address.';
+      emailErr.classList.remove('hidden');
+      emailInput.setAttribute('aria-invalid', 'true');
+      valid = false;
+    } else {
+      emailErr.classList.add('hidden');
+      emailInput.setAttribute('aria-invalid', 'false');
+    }
+
+    return valid;
+  }
+
+  // Step 1 submit — create PaymentIntent/Subscription, mount Stripe Element
+  document.getElementById('donate-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+
+    if (!stripeInstance) {
+      showToast('Payment processing is not available. Please refresh and try again.', 'error');
+      return;
+    }
+
+    const btn   = document.getElementById('submit-btn');
+    const label = document.getElementById('submit-label');
+    const icon  = document.getElementById('submit-icon');
+    btn.disabled = true;
+    icon.className = 'fas fa-spinner fa-spin';
+    label.textContent = 'Setting up payment…';
+
+    const token   = localStorage.getItem('edu_token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const endpoint = selectedType === 'monthly'
+      ? `${API}/api/donations/monthly`
+      : `${API}/api/donations/one-time`;
+
+    try {
+      const res  = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          amount:        selectedAmount,
+          name:          document.getElementById('donor-name').value.trim(),
+          email:         document.getElementById('donor-email').value.trim(),
+          message:       document.getElementById('donor-message').value.trim(),
+          anonymous:     document.getElementById('anonymous-toggle').checked,
+          donation_type: selectedType,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Something went wrong. Please try again.', 'error');
+        return;
       }
+
+      const { client_secret } = data.data;
+      if (!client_secret) {
+        showToast('Payment setup failed — no client secret returned.', 'error');
+        return;
+      }
+
+      // Mount Stripe Payment Element with the client_secret
+      await mountPaymentElement(client_secret);
+    } catch (_) {
+      showToast('Network error. Please check your connection and try again.', 'error');
+    } finally {
+      btn.disabled = false;
+      icon.className = 'fas fa-heart';
+      label.textContent = 'Donate Now';
+    }
+  });
+
+  async function mountPaymentElement(clientSecret) {
+    if (!stripeInstance) {
+      showToast('Stripe is not initialised. Please refresh and try again.', 'error');
+      return;
+    }
+
+    // Build elements with the appearance matching the site palette
+    const isDark = document.documentElement.classList.contains('dark');
+    stripeElements = stripeInstance.elements({
+      clientSecret,
+      appearance: {
+        theme: isDark ? 'night' : 'stripe',
+        variables: {
+          colorPrimary:    '#ea580c',
+          colorBackground: isDark ? '#1f2937' : '#ffffff',
+          colorText:       isDark ? '#f3f4f6' : '#111827',
+          borderRadius:    '12px',
+          fontFamily:      'system-ui, sans-serif',
+        },
+      },
     });
-  </script>
+
+    paymentElement = stripeElements.create('payment');
+    paymentElement.mount('#payment-element');
+
+    // Update payment step summary
+    const typeLabel = selectedType === 'monthly' ? 'Monthly donation' : 'One-time donation';
+    document.getElementById('pay-summary-label').textContent = typeLabel;
+    document.getElementById('pay-summary-amount').textContent = `$${selectedAmount.toFixed(2)}`;
+
+    showStep(2);
+    clearPaymentError();
+  }
+
+  // Step 2 — confirm payment with Stripe
+  async function confirmPayment() {
+    if (!stripeInstance || !stripeElements) return;
+
+    const btn   = document.getElementById('confirm-btn');
+    const label = document.getElementById('confirm-label');
+    const icon  = document.getElementById('confirm-icon');
+    btn.disabled = true;
+    icon.className = 'fas fa-spinner fa-spin';
+    label.textContent = 'Processing…';
+    clearPaymentError();
+
+    const returnUrl = `${window.location.origin}${window.location.pathname}`;
+
+    const { error } = await stripeInstance.confirmPayment({
+      elements: stripeElements,
+      confirmParams: { return_url: returnUrl },
+    });
+
+    // confirmPayment only returns here if there was an immediate error
+    // (redirect was prevented, e.g. card declined, validation failed).
+    // Successful payments redirect the browser to return_url automatically.
+    if (error) {
+      if (error.type === 'card_error' || error.type === 'validation_error') {
+        showPaymentError(error.message);
+      } else {
+        showPaymentError('An unexpected error occurred. Please try again.');
+      }
+    }
+
+    btn.disabled = false;
+    icon.className = 'fas fa-lock';
+    label.textContent = 'Complete Donation';
+  }
+
+  // Handle Stripe redirect return (redirect_status in URL)
+  function checkRedirectStatus() {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('redirect_status');
+    if (!status) return;
+
+    // Clean the URL so a refresh doesn't re-trigger this
+    history.replaceState({}, '', window.location.pathname);
+
+    if (status === 'succeeded') {
+      showStep(3);
+      loadStats();
+      loadRecentDonations();
+    } else if (status === 'requires_payment_method') {
+      showToast('Payment failed. Please try a different payment method.', 'error');
+    } else {
+      showToast('Payment could not be completed. Please try again.', 'error');
+    }
+  }
+
+  // Stripe initialisation — load publishable key from API
+  async function initStripe() {
+    try {
+      const res  = await fetch(`${API}/api/donations/config`);
+      const data = await res.json();
+      const pub  = data?.data?.publishable_key || '';
+      if (pub && typeof Stripe !== 'undefined') {
+        stripeInstance = Stripe(pub);
+      } else {
+        console.warn('[stripe] Publishable key not available or Stripe.js not loaded.');
+      }
+    } catch (e) {
+      console.warn('[stripe] Could not load config:', e);
+    }
+  }
+
+  // Stats
+  async function loadStats() {
+    try {
+      const res  = await fetch(`${API}/api/donations/stats`);
+      const data = await res.json();
+      if (data.success && data.data) {
+        const total = Number(data.data.total_donated);
+        document.getElementById('stat-total').textContent =
+          `$${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      }
+    } catch (_) {
+      document.getElementById('stat-total').textContent = '$0.00';
+    }
+  }
+
+  // Recent donations
+  async function loadRecentDonations() {
+    const skeletonEl = document.getElementById('donations-skeleton');
+    const listEl     = document.getElementById('donations-list');
+    const emptyEl    = document.getElementById('donations-empty');
+
+    skeletonEl.classList.remove('hidden');
+    listEl.classList.add('hidden');
+    emptyEl.classList.add('hidden');
+
+    try {
+      const res  = await fetch(`${API}/api/donations/recent`);
+      const data = await res.json();
+      const donations = (data.success && data.data && data.data.donations) || [];
+
+      skeletonEl.classList.add('hidden');
+      if (donations.length === 0) { emptyEl.classList.remove('hidden'); return; }
+      listEl.replaceChildren(...donations.map(renderDonation));
+      listEl.classList.remove('hidden');
+    } catch (_) {
+      skeletonEl.classList.add('hidden');
+      emptyEl.classList.remove('hidden');
+    }
+  }
+
+  function renderDonation(d) {
+    const date = d.created_at
+      ? new Date(d.created_at + (d.created_at.endsWith('Z') ? '' : 'Z'))
+          .toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+      : '';
+
+    const card = document.createElement('div');
+    card.className = 'bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-start gap-4';
+
+    const iconWrap = document.createElement('div');
+    iconWrap.className = 'w-10 h-10 rounded-full bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center shrink-0';
+    iconWrap.innerHTML = '<i class="fas fa-heart text-orange-500 dark:text-orange-400 text-sm" aria-hidden="true"></i>';
+
+    const body = document.createElement('div');
+    body.className = 'flex-1 min-w-0';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'font-semibold text-gray-900 dark:text-gray-100 text-sm';
+    nameEl.textContent = d.donor_name || 'Anonymous';
+    body.appendChild(nameEl);
+
+    if (d.message) {
+      const msgEl = document.createElement('div');
+      msgEl.className = 'text-sm text-gray-500 dark:text-gray-400 mt-0.5';
+      msgEl.textContent = d.message;
+      body.appendChild(msgEl);
+    }
+
+    if (date) {
+      const dateEl = document.createElement('div');
+      dateEl.className = 'text-xs text-gray-400 dark:text-gray-500 mt-1';
+      dateEl.textContent = date;
+      body.appendChild(dateEl);
+    }
+
+    const amountEl = document.createElement('div');
+    amountEl.className = 'font-bold text-orange-600 dark:text-orange-400 text-sm shrink-0';
+    amountEl.textContent = `$${Number(d.amount).toFixed(2)}`;
+
+    card.appendChild(iconWrap);
+    card.appendChild(body);
+    card.appendChild(amountEl);
+    return card;
+  }
+
+  // Boot
+  initStripe();
+  checkRedirectStatus();
+  loadStats();
+  loadRecentDonations();
+</script>
 {% endblock %}

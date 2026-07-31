@@ -42,6 +42,7 @@ import os
 import re
 import time
 import traceback
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, quote, unquote
@@ -51,6 +52,7 @@ from workers import Response, DurableObject
 import js
 from pyodide.ffi import to_js
 from js import WebSocketPair, WebSocketRequestResponsePair
+
 import uuid
 
 _SENTRY_INITIALIZED = False
@@ -1404,6 +1406,27 @@ async def init_db(env):
         )""",
         "CREATE INDEX IF NOT EXISTS idx_survey_answers_response ON survey_answers(response_id)",
         "CREATE INDEX IF NOT EXISTS idx_survey_answers_question ON survey_answers(question_id)",
+        """CREATE TABLE IF NOT EXISTS donations (
+            id                       TEXT PRIMARY KEY,
+            user_id                  TEXT,
+            amount                   INTEGER NOT NULL,
+            currency                 TEXT NOT NULL DEFAULT 'usd',
+            donation_type            TEXT NOT NULL DEFAULT 'one-time',
+            donor_name               TEXT,
+            donor_email              TEXT,
+            message                  TEXT,
+            anonymous                INTEGER NOT NULL DEFAULT 0,
+            status                   TEXT NOT NULL DEFAULT 'pending',
+            stripe_payment_intent_id TEXT,
+            stripe_subscription_id   TEXT,
+            stripe_customer_id       TEXT,
+            created_at               TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_donations_created_at ON donations(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_donations_status ON donations(status)",
+        "CREATE INDEX IF NOT EXISTS idx_donations_user_id ON donations(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_donations_status_created_at ON donations(status, created_at)",
     ]
     for sql in legacy_tables:
         await env.DB.prepare(sql).run()
@@ -4498,65 +4521,6 @@ async def api_features(req, env):
     })
 
 
-async def api_create_donation_checkout(req, env):
-    user = verify_token(req.headers.get("Authorization") or "", env.JWT_SECRET)
-    body, bad_resp = await parse_json_object(req)
-    if bad_resp:
-        return bad_resp
-
-    try:
-        amount_cents = int(body.get("amount_cents") or 0)
-    except Exception:
-        amount_cents = 0
-    if amount_cents < 100:
-        return err("Donation amount must be at least $1.00")
-    if amount_cents > 1000000:
-        return err("Donation amount is too large")
-
-    message = _legacy_text(body.get("message"))[:500]
-    email = _legacy_text(body.get("email")).strip()[:180]
-    origin = f"{urlparse(req.url).scheme}://{urlparse(req.url).netloc}"
-    fields = {
-        "mode": "payment",
-        "success_url": origin + "/checkout-success?donation=1&session_id={CHECKOUT_SESSION_ID}",
-        "cancel_url": origin + "/donate",
-        "line_items[0][quantity]": 1,
-        "line_items[0][price_data][currency]": "usd",
-        "line_items[0][price_data][unit_amount]": amount_cents,
-        "line_items[0][price_data][product_data][name]": "Alpha One Labs donation",
-        "metadata[kind]": "donation",
-    }
-    if user:
-        fields["metadata[user_id]"] = user["id"]
-    if email and "@" in email:
-        fields["customer_email"] = email
-
-    try:
-        session = await _stripe_form_request(env, "/checkout/sessions", fields)
-        session_id = session.get("id", "")
-        await env.DB.prepare(
-            "INSERT INTO donation_checkout_sessions"
-            " (id,user_id,stripe_session_id,status,amount_total,currency,message)"
-            " VALUES (?,?,?,?,?,?,?)"
-            " ON CONFLICT(stripe_session_id) DO UPDATE SET status=excluded.status,amount_total=excluded.amount_total"
-        ).bind(
-            new_id(),
-            user["id"] if user else None,
-            session_id,
-            "pending",
-            amount_cents,
-            "USD",
-            await encrypt_aes(message, env.ENCRYPTION_KEY) if message else "",
-        ).run()
-        return ok({
-            "checkout_url": session.get("url", ""),
-            "session_id": session_id,
-        }, "Donation checkout created")
-    except Exception as exc:
-        await capture_exception(exc, req, env, "api_create_donation_checkout")
-        return err("Could not create donation checkout", 500)
-
-
 async def serve_r2_media(path: str, env):
     bucket = getattr(env, "MY_BUCKET", None)
     if not bucket:
@@ -4937,18 +4901,46 @@ async def api_clear_cart(req, env):
     return json_resp(await _cart_payload(env, owner))
 
 
-async def _stripe_form_request(env, path: str, fields: Dict[str, Any]):
+def _stripe_encode(data: dict, prefix: str = "") -> list:
+    """Recursively flatten a nested dict/list into Stripe bracket-notation pairs.
+
+    Flat dicts with pre-bracketed string keys (the older calling convention)
+    pass through unchanged, since scalar values are appended as-is.
+    """
+    pairs = []
+    for key, value in data.items():
+        full_key = f"{prefix}[{key}]" if prefix else key
+        if isinstance(value, dict):
+            pairs.extend(_stripe_encode(value, full_key))
+        elif isinstance(value, list):
+            for i, item in enumerate(value):
+                item_key = f"{full_key}[{i}]"
+                if isinstance(item, dict):
+                    pairs.extend(_stripe_encode(item, item_key))
+                elif item is not None:
+                    pairs.append((item_key, str(item)))
+        elif isinstance(value, bool):
+            pairs.append((full_key, "true" if value else "false"))
+        elif value is not None:
+            pairs.append((full_key, str(value)))
+    return pairs
+
+
+async def _stripe_form_request(env, path: str, fields: Dict[str, Any], *, idempotency_key: str = ""):
     secret = getattr(env, "STRIPE_SECRET_KEY", "") or ""
     if not secret:
         raise RuntimeError("STRIPE_SECRET_KEY is not configured")
-    body = urlencode({k: str(v) for k, v in fields.items()})
+    body = urlencode(_stripe_encode(fields))
+    headers = {
+        "Authorization": "Bearer " + secret,
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
     options = to_js(
         {
             "method": "POST",
-            "headers": {
-                "Authorization": "Bearer " + secret,
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+            "headers": headers,
             "body": body,
         },
         dict_converter=js.Object.fromEntries,
@@ -4986,6 +4978,651 @@ async def _stripe_get_request(env, path: str):
         message = data.get("error", {}).get("message") if isinstance(data.get("error"), dict) else None
         raise RuntimeError(message or f"Stripe request failed with status {resp.status}")
     return data
+
+
+# ---------------------------------------------------------------------------
+# Donations — Stripe PaymentIntent (one-time) + Subscription (monthly)
+# ---------------------------------------------------------------------------
+
+_DONATION_TYPES = {"one-time", "monthly"}
+_DONATION_MIN_CENTS = 100        # $1.00
+_DONATION_MAX_CENTS = 1_000_000  # $10,000.00
+
+
+def _donation_dollars_to_cents(amount_dollars) -> int:
+    """Convert a dollar amount to cents using exact decimal arithmetic."""
+    d = Decimal(str(amount_dollars))
+    return int((d * 100).to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def _donation_cents_to_dollars(amount_cents: int) -> float:
+    return float(Decimal(amount_cents) / 100)
+
+
+def _validate_donation_payload(body: dict):
+    """Validate and normalise a donation payload.
+
+    Returns (normalised_payload, error_message). One of the two will be None.
+    """
+    amount_raw = body.get("amount")
+    if amount_raw is None:
+        return None, "amount is required"
+
+    try:
+        cleaned = str(amount_raw).replace(",", "").strip()
+        amount_d = Decimal(cleaned)
+        if not amount_d.is_finite():
+            raise ValueError("non-finite amount")
+    except (InvalidOperation, ValueError):
+        return None, "amount must be a valid number"
+
+    amount_cents = _donation_dollars_to_cents(amount_d)
+    if amount_cents < _DONATION_MIN_CENTS:
+        return None, "Minimum donation is $1.00"
+    if amount_cents > _DONATION_MAX_CENTS:
+        return None, "Maximum donation is $10,000.00"
+
+    donation_type = body.get("donation_type", "one-time")
+    if not isinstance(donation_type, str) or donation_type not in _DONATION_TYPES:
+        return None, f"donation_type must be one of: {', '.join(_DONATION_TYPES)}"
+
+    email_raw = body.get("email")
+    if email_raw is None:
+        return None, "email is required"
+    if not isinstance(email_raw, str):
+        return None, "email must be a string"
+    email = email_raw.strip()
+    if not email:
+        return None, "email is required"
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return None, "Invalid email address"
+
+    name_raw = body.get("name", "")
+    if not isinstance(name_raw, str):
+        return None, "name must be a string"
+    name = name_raw.strip()
+    if len(name) > 120:
+        return None, "Name must be 120 characters or less"
+
+    message_raw = body.get("message", "")
+    if not isinstance(message_raw, str):
+        return None, "message must be a string"
+    message = message_raw.strip()
+    if len(message) > 500:
+        return None, "Message must be 500 characters or less"
+
+    anonymous_raw = body.get("anonymous", False)
+    if not isinstance(anonymous_raw, bool):
+        return None, "anonymous must be a boolean"
+
+    return {
+        "amount_cents":   amount_cents,
+        "amount_dollars": _donation_cents_to_dollars(amount_cents),
+        "currency":       "usd",
+        "donation_type":  donation_type,
+        "name":           name,
+        "email":          email,
+        "message":        message,
+        "anonymous":      anonymous_raw,
+    }, None
+
+
+def _build_donation_record(donation_id: str, user_id: Optional[str], validated: dict) -> dict:
+    return {
+        "id":            donation_id,
+        "user_id":       user_id,
+        "amount":        validated["amount_cents"],
+        "currency":      validated["currency"],
+        "donation_type": validated["donation_type"],
+        "donor_name":    validated["name"] or None,
+        "donor_email":   validated["email"],
+        "message":       validated["message"],
+        "anonymous":     1 if validated["anonymous"] else 0,
+        "status":        "pending",
+    }
+
+
+def _format_donation_for_display(row) -> dict:
+    anonymous = bool(getattr(row, "anonymous", 0))
+    donor_name = getattr(row, "donor_name", None) or "Community Member"
+    return {
+        "id":            getattr(row, "id", ""),
+        "donor_name":    "Anonymous" if anonymous else donor_name,
+        "message":       getattr(row, "message", "") or "",
+        "amount":        _donation_cents_to_dollars(getattr(row, "amount", 0)),
+        "donation_type": getattr(row, "donation_type", "one-time"),
+        "created_at":    getattr(row, "created_at", ""),
+    }
+
+
+_DONATION_WEBHOOK_TOLERANCE_SECONDS = 300  # Stripe's recommended 5-minute replay window
+
+
+def _verify_donation_webhook(raw_body: str, sig_header: str, secret: str) -> bool:
+    """Verify a Stripe-Signature header using HMAC-SHA256 with replay protection."""
+    try:
+        parts: dict = {}
+        for chunk in sig_header.split(","):
+            k, v = chunk.split("=", 1)
+            parts.setdefault(k.strip(), []).append(v.strip())
+
+        timestamp = parts.get("t", [None])[0]
+        v1_sigs   = parts.get("v1", [])
+        if not timestamp or not v1_sigs:
+            return False
+
+        if abs(time.time() - int(timestamp)) > _DONATION_WEBHOOK_TOLERANCE_SECONDS:
+            print("[donations webhook] Signature timestamp out of tolerance — possible replay")
+            return False
+
+        signed   = f"{timestamp}.{raw_body}"
+        expected = _hmac.new(secret.encode(), signed.encode(), hashlib.sha256).hexdigest()
+        return any(_hmac.compare_digest(expected, s) for s in v1_sigs)
+    except Exception:
+        return False
+
+
+async def _send_donation_thank_you_email(env, info: dict) -> None:
+    to_email = (info.get("email") or "").strip()
+    if not to_email:
+        return
+
+    amount_str = f"${info.get('amount', 0) / 100:.2f}"
+    type_label = "monthly" if info.get("type") == "monthly" else "one-time"
+
+    html = f"""
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#374151;">
+  <div style="background:linear-gradient(135deg,#ea580c,#f97316);padding:32px;border-radius:12px;text-align:center;margin-bottom:24px;">
+    <h1 style="color:white;margin:0;font-size:28px;">Thank You!</h1>
+    <p style="color:rgba(255,255,255,.9);margin:8px 0 0;">Your generosity makes a real difference.</p>
+  </div>
+  <p style="font-size:16px;line-height:1.6;">
+    We received your {type_label} donation of
+    <strong style="color:#ea580c;">{amount_str}</strong>.
+    Your support helps us provide quality education to students around the world.
+  </p>
+  <p style="font-size:15px;line-height:1.6;">With your donation we can:</p>
+  <ul style="font-size:15px;line-height:2;">
+    <li>Provide scholarships to students in need</li>
+    <li>Develop new educational content and resources</li>
+    <li>Improve our platform and technology</li>
+    <li>Expand our reach to underserved communities</li>
+  </ul>
+  <p style="font-size:16px;line-height:1.6;">
+    Thank you for being part of our mission to make quality education accessible to everyone.
+  </p>
+  <p style="font-size:13px;color:#6b7280;margin-top:32px;border-top:1px solid #e5e7eb;padding-top:16px;">
+    Alpha One Labs &mdash;
+    <a href="https://alphaonelabs.com" style="color:#ea580c;">alphaonelabs.com</a>
+  </p>
+</div>"""
+
+    try:
+        await _send_email(to_email, "Thank You for Your Donation to Alpha One Labs!", html, env)
+    except Exception as exc:
+        print(f"[donations] thank-you email error: {exc}")
+
+
+_DONATION_ALLOWED_MARK_FIELDS = frozenset({
+    "stripe_payment_intent_id",
+    "stripe_subscription_id",
+    "stripe_customer_id",
+})
+
+# Status values ordered from "least final" to "most final".
+# An update that would move the status backward is skipped unless
+# allow_downgrade=True (used for explicit cancellation/failure events).
+_DONATION_STATUS_RANK = {"pending": 0, "completed": 1, "cancelled": 2, "failed": 2}
+
+
+async def _mark_donation(env, field: str, value: str, status: str, *, allow_downgrade: bool = False):
+    """Find a donation by a Stripe ID field and update its status.
+
+    Returns (row, changed) where `changed` is True only when the status
+    actually moved to a new value — callers use this to avoid re-sending
+    the thank-you email on repeat/replayed webhook deliveries for a status
+    the donation already has.
+
+    Raises ValueError for unknown field names (SQL-injection guard).
+    """
+    if field not in _DONATION_ALLOWED_MARK_FIELDS:
+        raise ValueError(f"_mark_donation: unknown field '{field}'")
+    row = await env.DB.prepare(
+        f"SELECT * FROM donations WHERE {field} = ? LIMIT 1"  # noqa: S608 — field is allowlisted above
+    ).bind(value).first()
+    if not row:
+        return None, False
+    current = getattr(row, "status", "pending") or "pending"
+    if current == status:
+        return row, False
+    if not allow_downgrade and _DONATION_STATUS_RANK.get(current, 0) >= _DONATION_STATUS_RANK.get(status, 0):
+        print(f"[donations] Skipping status regression {current!r} → {status!r} for {field}={value}")
+        return row, False
+    await env.DB.prepare(
+        "UPDATE donations SET status = ? WHERE id = ?"
+    ).bind(status, row.id).run()
+    return row, True
+
+
+async def get_donation_config(_, env):
+    """GET /api/donations/config — return Stripe publishable key."""
+    return ok({"publishable_key": getattr(env, "STRIPE_PUBLISHABLE_KEY", "") or ""})
+
+
+async def get_donation_stats(request, env):
+    """GET /api/donations/stats"""
+    try:
+        row = await env.DB.prepare(
+            "SELECT COUNT(DISTINCT donor_email) AS donor_count, SUM(amount) AS total_cents"
+            " FROM donations WHERE status = 'completed'"
+        ).first()
+        total_cents = getattr(row, "total_cents", 0) or 0
+        donor_count = int(getattr(row, "donor_count", 0) or 0)
+        return ok({"total_donated": round(total_cents / 100, 2), "donor_count": donor_count})
+    except Exception as exc:
+        print(f"[donations/stats] DB error: {exc}")
+        return ok({"total_donated": 0, "donor_count": 0})
+
+
+async def get_recent_donations(request, env):
+    """GET /api/donations/recent"""
+    try:
+        result = await env.DB.prepare(
+            "SELECT id, donor_name, message, amount, donation_type, anonymous, created_at"
+            " FROM donations WHERE status = 'completed'"
+            " ORDER BY created_at DESC LIMIT 10"
+        ).all()
+        rows = result.results or []
+        return ok({"donations": [_format_donation_for_display(r) for r in rows]})
+    except Exception as exc:
+        print(f"[donations/recent] DB error: {exc}")
+        return ok({"donations": []})
+
+
+async def create_donation_intent(request, env):
+    """POST /api/donations/one-time
+
+    Creates a Stripe PaymentIntent and a pending donation record.
+    Returns client_secret for the frontend to confirm with Stripe.js.
+    """
+    body, bad_resp = await parse_json_object(request)
+    if bad_resp:
+        return bad_resp
+
+    body["donation_type"] = "one-time"
+    validated, err_msg = _validate_donation_payload(body)
+    if err_msg:
+        return err(err_msg)
+
+    if not (getattr(env, "STRIPE_SECRET_KEY", "") or ""):
+        return err("Payment processing is not configured", 503)
+
+    user    = verify_token(request.headers.get("Authorization") or "", env.JWT_SECRET)
+    user_id = user["id"] if user else None
+
+    donation_id = new_id()  # generate first so it can serve as idempotency key
+
+    try:
+        intent = await _stripe_form_request(env, "/payment_intents", {
+            "amount":   validated["amount_cents"],
+            "currency": "usd",
+            "automatic_payment_methods": {"enabled": True, "allow_redirects": "always"},
+            "receipt_email": validated["email"],
+            "metadata": {
+                "donation_type": "one-time",
+                "user_id":       user_id or "",
+                "message":       validated["message"][:100],
+                "anonymous":     "true" if validated["anonymous"] else "false",
+                "email":         validated["email"],
+            },
+        }, idempotency_key=f"pi-{donation_id}")
+    except Exception as exc:
+        return err(f"Payment setup failed: {exc}", 502)
+
+    record = _build_donation_record(donation_id, user_id, validated)
+
+    try:
+        await env.DB.prepare(
+            "INSERT INTO donations"
+            " (id, user_id, amount, currency, donation_type, donor_name, donor_email, message,"
+            "  anonymous, status, stripe_payment_intent_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)"
+        ).bind(
+            record["id"], record["user_id"], record["amount"], record["currency"],
+            record["donation_type"], record["donor_name"], record["donor_email"], record["message"],
+            record["anonymous"], intent["id"],
+        ).run()
+    except Exception as exc:
+        await capture_exception(exc, request, env, "create_donation_intent")
+        return err("Failed to record donation", 500)
+
+    return ok({
+        "donation_id":   donation_id,
+        "client_secret": intent["client_secret"],
+        "amount":        validated["amount_dollars"],
+        "currency":      "usd",
+    }, "PaymentIntent created")
+
+
+async def _find_or_create_donation_customer(env, email: str, user_id: Optional[str], donation_id: str) -> dict:
+    """Reuse an existing Stripe Customer for this email instead of creating
+    a duplicate Customer (and splitting payment methods/history) on every
+    donation from the same donor."""
+    try:
+        existing = await _stripe_get_request(env, "/customers?limit=1&email=" + quote(email, safe=""))
+        results = existing.get("data") or []
+        if results:
+            return results[0]
+    except Exception as exc:
+        print(f"[donations] customer lookup failed, creating new: {exc}")
+    return await _stripe_form_request(env, "/customers", {
+        "email":    email,
+        "metadata": {"user_id": user_id or ""},
+    }, idempotency_key=f"cus-{donation_id}")
+
+
+_DONATION_PRODUCT_SEARCH_QUERY = "metadata['kind']:'monthly_donation'"
+
+
+async def _get_or_create_donation_product_id(env) -> str:
+    """Reuse a single Stripe Product for all monthly donations instead of
+    creating a new Product (visible in the dashboard) on every subscription."""
+    configured = getattr(env, "STRIPE_DONATION_PRODUCT_ID", "") or ""
+    if configured:
+        return configured
+    try:
+        found = await _stripe_get_request(env, "/products/search?query=" + quote(_DONATION_PRODUCT_SEARCH_QUERY, safe=""))
+        results = found.get("data") or []
+        if results:
+            return results[0]["id"]
+    except Exception as exc:
+        print(f"[donations] product search failed, creating new: {exc}")
+    product = await _stripe_form_request(env, "/products", {
+        "name":     "Alpha One Labs Monthly Donation",
+        "metadata": {"kind": "monthly_donation"},
+    }, idempotency_key="donation-product-create")
+    return product["id"]
+
+
+async def create_subscription_intent(request, env):
+    """POST /api/donations/monthly
+
+    Reuses (or creates) a Stripe Customer and a shared donation Product, then
+    creates a Subscription with an inline per-amount recurring price and
+    payment_behavior=default_incomplete so that the first payment is handled
+    via the Subscription's latest_invoice PaymentIntent client_secret.
+
+    Subsequent monthly charges are handled automatically by Stripe and
+    recorded via the invoice.payment_succeeded webhook.
+    """
+    body, bad_resp = await parse_json_object(request)
+    if bad_resp:
+        return bad_resp
+
+    body["donation_type"] = "monthly"
+    validated, err_msg = _validate_donation_payload(body)
+    if err_msg:
+        return err(err_msg)
+
+    if not (getattr(env, "STRIPE_SECRET_KEY", "") or ""):
+        return err("Payment processing is not configured", 503)
+
+    user    = verify_token(request.headers.get("Authorization") or "", env.JWT_SECRET)
+    user_id = user["id"] if user else None
+
+    donation_id = new_id()  # generate first so it anchors all idempotency keys
+
+    try:
+        customer   = await _find_or_create_donation_customer(env, validated["email"], user_id, donation_id)
+        product_id = await _get_or_create_donation_product_id(env)
+
+        # Subscription with an inline recurring price for this donation amount,
+        # attached to the shared donation product.
+        subscription = await _stripe_form_request(env, "/subscriptions", {
+            "customer": customer["id"],
+            "items": [{
+                "price_data": {
+                    "currency":    "usd",
+                    "unit_amount": validated["amount_cents"],
+                    "recurring":   {"interval": "month"},
+                    "product":     product_id,
+                },
+            }],
+            "payment_behavior": "default_incomplete",
+            "payment_settings": {"save_default_payment_method": "on_subscription"},
+            "expand":           ["latest_invoice.payment_intent"],
+            "metadata": {
+                "donation_type": "monthly",
+                "user_id":       user_id or "",
+                "message":       validated["message"][:100],
+                "anonymous":     "true" if validated["anonymous"] else "false",
+                "email":         validated["email"],
+            },
+        }, idempotency_key=f"sub-{donation_id}")
+    except Exception as exc:
+        return err(f"Subscription setup failed: {exc}", 502)
+
+    try:
+        payment_intent    = subscription["latest_invoice"]["payment_intent"]
+        client_secret     = payment_intent["client_secret"]
+        payment_intent_id = payment_intent["id"]
+    except (KeyError, TypeError):
+        return err("Failed to retrieve payment details from subscription", 502)
+
+    record = _build_donation_record(donation_id, user_id, validated)
+
+    try:
+        await env.DB.prepare(
+            "INSERT INTO donations"
+            " (id, user_id, amount, currency, donation_type, donor_name, donor_email, message,"
+            "  anonymous, status, stripe_payment_intent_id, stripe_subscription_id, stripe_customer_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)"
+        ).bind(
+            record["id"], record["user_id"], record["amount"], record["currency"],
+            record["donation_type"], record["donor_name"], record["donor_email"], record["message"],
+            record["anonymous"],
+            payment_intent_id, subscription["id"], customer["id"],
+        ).run()
+    except Exception as exc:
+        await capture_exception(exc, request, env, "create_subscription_intent")
+        return err("Failed to record subscription", 500)
+
+    return ok({
+        "donation_id":     donation_id,
+        "client_secret":   client_secret,
+        "subscription_id": subscription["id"],
+        "amount":          validated["amount_dollars"],
+        "currency":        "usd",
+    }, "Subscription created")
+
+
+async def handle_donation_webhook(request, env):
+    """POST /api/donations/webhook — process Stripe webhook events."""
+    webhook_secret = getattr(env, "STRIPE_WEBHOOK_SECRET", "") or ""
+    if not webhook_secret:
+        return err("Webhook not configured", 503)
+
+    raw_body   = await request.text()
+    sig_header = request.headers.get("Stripe-Signature") or ""
+
+    if not _verify_donation_webhook(raw_body, sig_header, webhook_secret):
+        print("[donations webhook] Invalid Stripe signature")
+        return err("Invalid signature", 400)
+
+    try:
+        event = json.loads(raw_body)
+    except Exception:
+        return err("Invalid JSON", 400)
+
+    event_type = event.get("type", "")
+    obj        = (event.get("data") or {}).get("object") or {}
+    print(f"[donations webhook] {event_type}")
+
+    handler_exc = None
+    try:
+        if   event_type == "payment_intent.succeeded":
+            await _on_donation_payment_succeeded(env, obj)
+        elif event_type == "payment_intent.payment_failed":
+            await _on_donation_payment_failed(env, obj)
+        elif event_type == "customer.subscription.created":
+            await _on_donation_subscription_created(env, obj)
+        elif event_type == "customer.subscription.updated":
+            await _on_donation_subscription_updated(env, obj)
+        elif event_type == "customer.subscription.deleted":
+            await _on_donation_subscription_cancelled(env, obj)
+        elif event_type == "invoice.payment_succeeded":
+            await _on_donation_invoice_paid(env, obj)
+        elif event_type == "invoice.payment_failed":
+            await _on_donation_invoice_failed(env, obj)
+    except Exception as exc:
+        await capture_exception(exc, request, env, f"handle_donation_webhook:{event_type}")
+        handler_exc = exc
+
+    # Return 500 for transient errors (DB failures, etc.) so Stripe retries.
+    # Return 200 for unknown event types — no retry needed.
+    if handler_exc is not None:
+        return json_resp({"error": "processing_failed"}, 500)
+    return json_resp({"received": True}, 200)
+
+
+async def _on_donation_payment_succeeded(env, intent: dict) -> None:
+    intent_id = intent.get("id", "")
+    row, changed = await _mark_donation(env, "stripe_payment_intent_id", intent_id, "completed")
+    if not row:
+        print(f"[donations webhook] No donation found for PaymentIntent {intent_id}")
+        return
+    print(f"[donations webhook] Donation {row.id} completed")
+    if changed:
+        # Only email on the transition into "completed" — a replayed or
+        # retried webhook for an already-completed donation must not
+        # re-send the receipt.
+        await _send_donation_thank_you_email(env, {
+            "email":  getattr(row, "donor_email", "") or "",
+            "amount": getattr(row, "amount", 0),
+            "type":   getattr(row, "donation_type", "one-time"),
+        })
+
+
+async def _on_donation_payment_failed(env, intent: dict) -> None:
+    intent_id = intent.get("id", "")
+    await _mark_donation(env, "stripe_payment_intent_id", intent_id, "failed", allow_downgrade=True)
+    print(f"[donations webhook] PaymentIntent {intent_id} failed")
+
+
+async def _on_donation_subscription_created(env, sub: dict) -> None:
+    sub_id = sub.get("id", "")
+    # Only set to pending if not already completed (payment_intent.succeeded fires first
+    # for the initial payment and owns setting completed).
+    if sub.get("status") != "active":
+        await _mark_donation(env, "stripe_subscription_id", sub_id, "pending")
+    print(f"[donations webhook] Subscription {sub_id} created → {sub.get('status')}")
+
+
+async def _on_donation_subscription_updated(env, sub: dict) -> None:
+    sub_id = sub.get("id", "")
+    stripe_status = sub.get("status", "")
+    # Only map downgrade states; "active" is not forced here because
+    # payment_intent.succeeded already owns the completed transition.
+    status_map = {"past_due": "pending", "canceled": "cancelled", "unpaid": "pending"}
+    if stripe_status in status_map:
+        await _mark_donation(env, "stripe_subscription_id", sub_id, status_map[stripe_status], allow_downgrade=True)
+    print(f"[donations webhook] Subscription {sub_id} updated → {stripe_status}")
+
+
+async def _on_donation_subscription_cancelled(env, sub: dict) -> None:
+    sub_id = sub.get("id", "")
+    await _mark_donation(env, "stripe_subscription_id", sub_id, "cancelled", allow_downgrade=True)
+    print(f"[donations webhook] Subscription {sub_id} cancelled")
+
+
+def _invoice_subscription_id(invoice: dict) -> str:
+    """Extract the subscription ID, supporting both the pre-2025-03-31 shape
+    (invoice.subscription) and the newer shape
+    (invoice.parent.subscription_details.subscription)."""
+    sub_id = invoice.get("subscription")
+    if sub_id:
+        return sub_id
+    parent = invoice.get("parent") or {}
+    details = parent.get("subscription_details") or {}
+    return details.get("subscription") or ""
+
+
+def _invoice_payment_intent_id(invoice: dict) -> str:
+    """Extract the PaymentIntent ID, supporting both the pre-2025-03-31 shape
+    (invoice.payment_intent) and the newer shape (invoice.payments[].payment.payment_intent)."""
+    pi = invoice.get("payment_intent")
+    if pi:
+        return pi
+    for payment in invoice.get("payments") or []:
+        candidate = ((payment or {}).get("payment") or {}).get("payment_intent")
+        if candidate:
+            return candidate
+    return ""
+
+
+async def _on_donation_invoice_paid(env, invoice: dict) -> None:
+    """Recurring monthly charge succeeded — insert a new completed donation row.
+
+    DB errors are allowed to propagate so handle_donation_webhook() returns a
+    5xx and Stripe retries delivery; only the best-effort thank-you email is
+    swallowed on failure.
+    """
+    sub_id = _invoice_subscription_id(invoice)
+    if not sub_id:
+        return
+
+    # Find the original subscription donation to copy its details
+    row = await env.DB.prepare(
+        "SELECT * FROM donations WHERE stripe_subscription_id = ? LIMIT 1"
+    ).bind(sub_id).first()
+    if not row:
+        print(f"[donations webhook] No donation found for subscription {sub_id}")
+        return
+
+    # Avoid duplicating the first payment already handled by payment_intent.succeeded
+    invoice_pi = _invoice_payment_intent_id(invoice)
+    if invoice_pi:
+        existing = await env.DB.prepare(
+            "SELECT id FROM donations WHERE stripe_payment_intent_id = ? LIMIT 1"
+        ).bind(invoice_pi).first()
+        if existing:
+            return
+
+    new_donation_id = new_id()
+    await env.DB.prepare(
+        "INSERT INTO donations"
+        " (id, user_id, amount, currency, donation_type, donor_name, donor_email, message,"
+        "  anonymous, status, stripe_subscription_id, stripe_customer_id, stripe_payment_intent_id)"
+        " VALUES (?, ?, ?, ?, 'monthly', ?, ?, ?, ?, 'completed', ?, ?, ?)"
+    ).bind(
+        new_donation_id,
+        getattr(row, "user_id", None),
+        getattr(row, "amount", 0),
+        getattr(row, "currency", "usd"),
+        getattr(row, "donor_name", None),
+        getattr(row, "donor_email", ""),
+        getattr(row, "message", ""),
+        getattr(row, "anonymous", 0),
+        sub_id,
+        getattr(row, "stripe_customer_id", None),
+        invoice_pi or None,
+    ).run()
+
+    print(f"[donations webhook] Recurring donation {new_donation_id} recorded for subscription {sub_id}")
+    try:
+        await _send_donation_thank_you_email(env, {
+            "email":  getattr(row, "donor_email", "") or "",
+            "amount": getattr(row, "amount", 0),
+            "type":   "monthly",
+        })
+    except Exception as exc:
+        print(f"[donations webhook] thank-you email error: {exc}")
+
+
+async def _on_donation_invoice_failed(_, invoice: dict) -> None:
+    sub_id = _invoice_subscription_id(invoice)
+    if sub_id:
+        print(f"[donations webhook] Invoice payment failed for subscription {sub_id}")
 
 
 async def api_create_checkout(req, env):
@@ -7623,9 +8260,6 @@ async def _dispatch(request, env):
         if path in ("/api/features", "/api/legacy-features") and method == "GET":
             return await api_features(request, env)
 
-        if path == "/api/donations/checkout" and method == "POST":
-            return await api_create_donation_checkout(request, env)
-
         if path == "/api/admin/table-counts" and method == "GET":
             return await api_admin_table_counts(request, env)
 
@@ -7685,6 +8319,20 @@ async def _dispatch(request, env):
             return await api_get_notification_preferences(request, env)
         if path == "/api/notification-preferences" and method == "PATCH":
             return await api_patch_notification_preferences(request, env)
+
+        # Donations
+        if path == "/api/donations/config" and method == "GET":
+            return await get_donation_config(request, env)
+        if path == "/api/donations/stats" and method == "GET":
+            return await get_donation_stats(request, env)
+        if path == "/api/donations/recent" and method == "GET":
+            return await get_recent_donations(request, env)
+        if path == "/api/donations/one-time" and method == "POST":
+            return await create_donation_intent(request, env)
+        if path == "/api/donations/monthly" and method == "POST":
+            return await create_subscription_intent(request, env)
+        if path == "/api/donations/webhook" and method == "POST":
+            return await handle_donation_webhook(request, env)
 
         return err("API endpoint not found", 404)
 
