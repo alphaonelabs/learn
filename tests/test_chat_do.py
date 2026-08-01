@@ -12,7 +12,7 @@ worker = load_worker()
 ChatDO = worker.ChatDO
 
 
-def _make_ctx(sockets=None) -> MagicMock:
+def _make_ctx(sockets: list | None = None) -> MagicMock:
     ctx = MagicMock()
     ctx.getWebSockets.return_value = sockets or []
     ctx.setWebSocketAutoResponse.return_value = None
@@ -20,7 +20,7 @@ def _make_ctx(sockets=None) -> MagicMock:
     return ctx
 
 
-def _make_chat_env(*, allow_anon="true", jwt_secret="test-jwt-secret", enc_key="") -> MagicMock:
+def _make_chat_env(*, allow_anon: str = "true", jwt_secret: str = "test-jwt-secret", enc_key: str = "") -> MagicMock:
     env = make_env(jwt_secret=jwt_secret)
     env.ALLOW_ANON_CLASSROOM_POC = allow_anon
     if enc_key:
@@ -28,9 +28,12 @@ def _make_chat_env(*, allow_anon="true", jwt_secret="test-jwt-secret", enc_key="
     return env
 
 
-def _make_request(path="ws://localhost/ws/chat/room1",
-                  upgrade="websocket",
-                  token=None, user_id=None, display_name=None, classroom_id="room1") -> MockRequest:
+def _make_request(path: str = "ws://localhost/ws/chat/room1",
+                  upgrade: str = "websocket",
+                  token: str | None = None,
+                  user_id: str | None = None,
+                  display_name: str | None = None,
+                  classroom_id: str = "room1") -> MockRequest:
     qs_parts = []
     if token:
         qs_parts.append(f"token={token}")
@@ -74,6 +77,33 @@ class TestChatDOFetch:
         req = _make_request(user_id="user1", display_name="User One")
         resp = await do.on_fetch(req)
         assert resp.status == 401
+
+    async def test_authenticated_jwt_token_overrides_query_params(self):
+        ctx = _make_ctx()
+        env = _make_chat_env(jwt_secret="test-jwt-secret")
+        token = worker.create_token("uid-verified", "verified_user", "member", "test-jwt-secret")
+        do = ChatDO(ctx, env)
+        req = _make_request(token=token, user_id="imposter", display_name="Imposter")
+        resp = await do.on_fetch(req)
+        assert resp.status == 101
+        sid = next(iter(do.sessions))
+        assert do.sessions[sid]["user_id"] == "uid-verified"
+        assert do.sessions[sid]["display_name"] == "verified_user"
+
+    async def test_hibernation_restores_sessions(self):
+        mock_ws = MagicMock()
+        mock_ws.deserializeAttachment.return_value = json.dumps({
+            "session_id": "restored-sess-1",
+            "user_id": "alice",
+            "display_name": "Alice",
+            "classroom_id": "room1",
+        })
+        ctx = _make_ctx(sockets=[mock_ws])
+        env = _make_chat_env()
+        do = ChatDO(ctx, env)
+        assert "restored-sess-1" in do.sessions
+        assert do.sessions["restored-sess-1"]["user_id"] == "alice"
+        assert do.sessions["restored-sess-1"]["display_name"] == "Alice"
 
     async def test_loads_and_sends_chat_history(self):
         ctx = _make_ctx()
