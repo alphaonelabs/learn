@@ -270,7 +270,7 @@ class ChatDO(DurableObject):
         info = None
         for s_id, s_info in self.sessions.items():
             try:
-                if s_info["ws"] == ws:
+                if s_info["ws"] is ws or s_info["ws"] == ws:
                     sid, info = s_id, s_info
                     break
             except Exception:
@@ -285,7 +285,10 @@ class ChatDO(DurableObject):
             except Exception:
                 pass
         if not info:
+            print("INFO IS NONE - EXITING")
             return
+        else:
+            print("INFO IS:", info)
 
         if data.get("type") != "chat_message":
             return
@@ -378,7 +381,7 @@ class ChatDO(DurableObject):
         except Exception as exc:
             print(f"[ChatDO._ensure_table] error={exc!r}")
 
-    async def _persist_message(self, msg_id: str, classroom_id: str, user_id: str, display_name: str, text: str):
+    async def _persist_message(self, msg_id: str, classroom_id: str, user_id: str, display_name: str, text: str) -> bool:
         try:
             raw_key = getattr(self.env, "CHAT_ENCRYPTION_KEY", None) or getattr(self.env, "ENCRYPTION_KEY", None)
             enc_key = raw_key.strip() if isinstance(raw_key, str) and raw_key.strip() else ""
@@ -386,6 +389,7 @@ class ChatDO(DurableObject):
             await self.env.DB.prepare(
                 "INSERT INTO chat_message (id, classroom_id, user_id, display_name, content, created_at) VALUES (?, ?, ?, ?, ?, datetime('now'))"
             ).bind(msg_id, classroom_id, user_id, display_name, stored_content).run()
+            return True
         except Exception as exc:
             if "no such table" in str(exc).lower():
                 await self._ensure_table()
@@ -393,8 +397,10 @@ class ChatDO(DurableObject):
                     await self.env.DB.prepare(
                         "INSERT INTO chat_message (id, classroom_id, user_id, display_name, content, created_at) VALUES (?, ?, ?, ?, ?, datetime('now'))"
                     ).bind(msg_id, classroom_id, user_id, display_name, stored_content).run()
+                    return True
                 except Exception as retry_exc:
                     print(f"[ChatDO._persist_message.retry] error={retry_exc!r}")
             else:
                 print(f"[ChatDO._persist_message] error={exc!r}")
+            return False
 

@@ -53,17 +53,9 @@ from pyodide.ffi import to_js
 from js import WebSocketPair, WebSocketRequestResponsePair
 import uuid
 try:
-    from chat_do import ChatDO as _ChatDO
-except ModuleNotFoundError:
-    try:
-        from src.chat_do import ChatDO as _ChatDO
-    except ModuleNotFoundError:
-        # Fallback stub for local tooling environments where chat_do is absent.
-        class _ChatDO(DurableObject):
-            pass
-
-# Re-export as ChatDO so wrangler binding resolves in production
-ChatDO = _ChatDO
+    from chat_do import ChatDO
+except ImportError:
+    from src.chat_do import ChatDO
 
 _SENTRY_INITIALIZED = False
 _SENTRY_DSN: str = ""

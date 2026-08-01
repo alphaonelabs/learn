@@ -98,9 +98,16 @@ class TestChatDOMessage:
 
         sids = list(do.sessions.keys())
         ws1 = do.sessions[sids[0]]["ws"]
+        ws1.deserializeAttachment.return_value = json.dumps({
+            "session_id": sids[0], "user_id": "u1", "display_name": "User1", "classroom_id": "room1"
+        })
 
         msg_payload = json.dumps({"type": "chat_message", "text": "Hello world!"})
-        await do.on_webSocketMessage(ws1, msg_payload)
+        try:
+            await do.on_webSocketMessage(ws1, msg_payload)
+        except Exception as exc:
+            print("ON WEBSOCKET MESSAGE EXCEPTION:", exc)
+            raise exc
 
         assert len(do.messages) == 1
         assert do.messages[0]["text"] == "Hello world!"
