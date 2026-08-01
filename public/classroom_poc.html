@@ -167,7 +167,7 @@
 </div>
 
 <!--CLASSROOM SCREEN-->
-<div id="classroomScreen" class="flex-1 flex-col hidden">
+<div id="classroomScreen" class="flex-1 flex-col h-screen max-h-screen overflow-hidden hidden">
 
     <!-- Top Bar -->
     <header class="bg-gray-900/90 backdrop-blur-xl border-b border-gray-800 px-4 py-2.5 flex items-center justify-between shrink-0">
@@ -266,12 +266,12 @@
         </div>
 
         <!-- Chat Sidebar -->
-        <div id="chatPanel" class="w-full lg:w-80 h-64 lg:h-auto shrink-0 bg-gray-900/70 border-t lg:border-t-0 lg:border-l border-gray-800 flex flex-col">
+        <div id="chatPanel" class="w-full lg:w-80 h-72 lg:h-full max-h-[380px] lg:max-h-full min-h-0 shrink-0 bg-gray-900/70 border-t lg:border-t-0 lg:border-l border-gray-800 flex flex-col">
             <div class="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
                 <i data-lucide="message-circle" class="w-4 h-4 text-teal-400"></i>
                 <h2 class="text-sm font-semibold text-gray-200">Room Chat</h2>
             </div>
-            <div id="chatMessages" role="log" aria-live="polite" aria-relevant="additions" class="flex-1 overflow-y-auto p-3 space-y-2">
+            <div id="chatMessages" role="log" aria-live="polite" aria-relevant="additions" class="flex-1 overflow-y-auto min-h-0 p-3 space-y-2">
                 <div class="text-center text-xs text-gray-600 py-6">No messages yet!</div>
             </div>
             <form id="chatForm" class="p-3 border-t border-gray-800 flex gap-2">
@@ -629,6 +629,7 @@
         lobby.classList.add('hidden');
         classroomScreen.classList.remove('hidden');
         classroomScreen.classList.add('flex');
+        document.body.classList.add('overflow-hidden', 'h-screen');
 
         renderDesks();
         connectWS();
@@ -650,6 +651,7 @@
         classroomScreen.classList.add('hidden');
         classroomScreen.classList.remove('flex');
         lobby.classList.remove('hidden');
+        document.body.classList.remove('overflow-hidden', 'h-screen');
         Object.keys(participants).forEach(k => delete participants[k]);
         Object.keys(presenceByUser).forEach(k => delete presenceByUser[k]);
         avatarLayer.innerHTML = '';
@@ -780,7 +782,7 @@
         if (chatWs && (chatWs.readyState === WebSocket.OPEN || chatWs.readyState === WebSocket.CONNECTING)) return;
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const params = new URLSearchParams();
-        const token = localStorage.getItem('auth_token');
+        const token = localStorage.getItem('auth_token') || localStorage.getItem('edu_token');
         if (token) {
             // Prefer authenticated token so the server derives identity server-side.
             params.set('token', token);

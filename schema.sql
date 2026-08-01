@@ -182,5 +182,4 @@ CREATE TABLE IF NOT EXISTS chat_message (
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_chat_classroom ON chat_message(classroom_id);
 CREATE INDEX IF NOT EXISTS idx_chat_created   ON chat_message(classroom_id, created_at);

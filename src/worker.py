@@ -55,7 +55,7 @@ import uuid
 try:
     from chat_do import ChatDO
 except ImportError:
-    from src.chat_do import ChatDO
+    from src.chat_do import ChatDO as ChatDO
 
 _SENTRY_INITIALIZED = False
 _SENTRY_DSN: str = ""

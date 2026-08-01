@@ -12,7 +12,7 @@ worker = load_worker()
 ChatDO = worker.ChatDO
 
 
-def _make_ctx(sockets=None):
+def _make_ctx(sockets=None) -> MagicMock:
     ctx = MagicMock()
     ctx.getWebSockets.return_value = sockets or []
     ctx.setWebSocketAutoResponse.return_value = None
@@ -20,7 +20,7 @@ def _make_ctx(sockets=None):
     return ctx
 
 
-def _make_chat_env(*, allow_anon="true", jwt_secret="test-jwt-secret", enc_key=""):
+def _make_chat_env(*, allow_anon="true", jwt_secret="test-jwt-secret", enc_key="") -> MagicMock:
     env = make_env(jwt_secret=jwt_secret)
     env.ALLOW_ANON_CLASSROOM_POC = allow_anon
     if enc_key:
@@ -30,7 +30,7 @@ def _make_chat_env(*, allow_anon="true", jwt_secret="test-jwt-secret", enc_key="
 
 def _make_request(path="ws://localhost/ws/chat/room1",
                   upgrade="websocket",
-                  token=None, user_id=None, display_name=None, classroom_id="room1"):
+                  token=None, user_id=None, display_name=None, classroom_id="room1") -> MockRequest:
     qs_parts = []
     if token:
         qs_parts.append(f"token={token}")
@@ -67,6 +67,14 @@ class TestChatDOFetch:
         assert resp.status == 101
         assert len(do.sessions) == 1
 
+    async def test_rejects_anon_when_disabled(self):
+        ctx = _make_ctx()
+        env = _make_chat_env(allow_anon="false")
+        do = ChatDO(ctx, env)
+        req = _make_request(user_id="user1", display_name="User One")
+        resp = await do.on_fetch(req)
+        assert resp.status == 401
+
     async def test_loads_and_sends_chat_history(self):
         ctx = _make_ctx()
         env = _make_chat_env()
@@ -81,7 +89,11 @@ class TestChatDOFetch:
         assert resp.status == 101
         assert len(do.messages) == 1
         assert do.messages[0]["text"] == "Hello"
-
+        sid = next(iter(do.sessions))
+        ws = do.sessions[sid]["ws"]
+        history_frame = json.loads(ws.send.call_args[0][0])
+        assert history_frame["type"] == "chat_history"
+        assert len(history_frame["messages"]) == 1
 
 @pytest.mark.asyncio
 class TestChatDOMessage:
@@ -98,18 +110,19 @@ class TestChatDOMessage:
 
         sids = list(do.sessions.keys())
         ws1 = do.sessions[sids[0]]["ws"]
+        ws2 = do.sessions[sids[1]]["ws"]
         ws1.deserializeAttachment.return_value = json.dumps({
             "session_id": sids[0], "user_id": "u1", "display_name": "User1", "classroom_id": "room1"
         })
 
         msg_payload = json.dumps({"type": "chat_message", "text": "Hello world!"})
-        try:
-            await do.on_webSocketMessage(ws1, msg_payload)
-        except Exception as exc:
-            print("ON WEBSOCKET MESSAGE EXCEPTION:", exc)
-            raise exc
+        await do.on_webSocketMessage(ws1, msg_payload)
 
         assert len(do.messages) == 1
+        assert do.messages[0]["text"] == "Hello world!"
+        broadcast_frame = json.loads(ws2.send.call_args[0][0])
+        assert broadcast_frame["type"] == "chat_message"
+        assert broadcast_frame["text"] == "Hello world!"
         assert do.messages[0]["text"] == "Hello world!"
 
 
