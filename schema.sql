@@ -171,3 +171,19 @@ CREATE TABLE IF NOT EXISTS message_requests (
 CREATE INDEX IF NOT EXISTS idx_message_requests_to_user ON message_requests(to_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_message_requests_from_user ON message_requests(from_user_id);
 CREATE INDEX IF NOT EXISTS idx_message_requests_activity ON message_requests(activity_id);
+
+-- COURSE MATERIALS
+CREATE TABLE IF NOT EXISTS course_materials (
+    id          TEXT PRIMARY KEY,
+    activity_id TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    description TEXT,
+    file_key    TEXT NOT NULL,
+    uploaded_by TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+    FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_materials_uploader ON course_materials(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_materials_created  ON course_materials(activity_id, created_at DESC);

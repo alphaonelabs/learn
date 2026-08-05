@@ -134,12 +134,20 @@
           </section>
 
           <section class="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden border border-gray-100 dark:border-gray-700">
-            <div class="flex border-b border-gray-200 dark:border-gray-700">
-              <div class="px-6 py-3 text-sm font-medium border-b-2 border-teal-300 dark:border-teal-500 text-gray-800 dark:text-white bg-white dark:bg-gray-800">
+            <div class="flex border-b border-gray-200 dark:border-gray-700" role="tablist">
+              <button type="button" id="tab-btn-details" onclick="switchDetailTab('details')" role="tab" aria-selected="true" aria-controls="tab-panel-details"
+                class="px-6 py-3 text-sm font-medium border-b-2 border-teal-500 text-teal-600 dark:text-teal-400 bg-white dark:bg-gray-800 focus:outline-none flex items-center">
                 <i class="fas fa-book-open mr-2 text-teal-500 dark:text-teal-400"></i>Activity Details
-              </div>
+              </button>
+              <button type="button" id="tab-btn-materials" onclick="switchDetailTab('materials')" role="tab" aria-selected="false" aria-controls="tab-panel-materials"
+                class="px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-teal-600 dark:hover:text-teal-400 bg-white dark:bg-gray-800 focus:outline-none flex items-center">
+                <i class="fa-solid fa-folder-open mr-2 text-teal-500 dark:text-teal-400"></i>Course Materials
+                <span id="detail-mat-count" class="ml-2 text-xs bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300 px-2 py-0.5 rounded-full font-normal"></span>
+              </button>
             </div>
-            <div class="p-6">
+
+            <!-- Tab Panel: Details -->
+            <div id="tab-panel-details" role="tabpanel" aria-labelledby="tab-btn-details" class="p-6">
               <div id="welcome-card" class="mb-6 rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-100 dark:border-teal-800 p-4">
                 <h2 class="font-bold text-lg text-gray-800 dark:text-gray-200 mb-2 flex items-center">
                   <i class="fas fa-star mr-2 text-yellow-500"></i>Welcome!
@@ -161,6 +169,21 @@
                 </div>
                 <div id="act-video"></div>
                 <div id="act-tags" class="flex flex-wrap gap-2"></div>
+              </div>
+            </div>
+
+            <!-- Tab Panel: Course Materials -->
+            <div id="tab-panel-materials" role="tabpanel" aria-labelledby="tab-btn-materials" class="p-6 hidden">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                  <i class="fa-solid fa-folder-open text-teal-500"></i>Course Materials
+                </h3>
+                <a id="mat-manage-link" href="/course-materials.html" class="text-sm font-semibold text-teal-600 dark:text-teal-400 hover:underline inline-flex items-center gap-1">
+                  Manage / View All <i class="fas fa-arrow-right text-xs"></i>
+                </a>
+              </div>
+              <div id="detail-mat-list" class="space-y-3">
+                <div class="text-sm text-gray-500 dark:text-gray-400 italic">Loading materials...</div>
               </div>
             </div>
           </section>
@@ -359,6 +382,104 @@
     renderSessions(data);
     renderAction(data);
     loadActivityContacts(data);
+    loadDetailMaterials(a.id);
+  }
+
+  function switchDetailTab(tab) {
+    const isDetails = tab === 'details';
+    const panelDetails = document.getElementById('tab-panel-details');
+    const panelMaterials = document.getElementById('tab-panel-materials');
+    if (panelDetails) panelDetails.classList.toggle('hidden', !isDetails);
+    if (panelMaterials) panelMaterials.classList.toggle('hidden', isDetails);
+
+    const btnDetails = document.getElementById('tab-btn-details');
+    const btnMaterials = document.getElementById('tab-btn-materials');
+
+    if (btnDetails && btnMaterials) {
+      btnDetails.setAttribute('aria-selected', isDetails ? 'true' : 'false');
+      btnMaterials.setAttribute('aria-selected', isDetails ? 'false' : 'true');
+      if (isDetails) {
+        btnDetails.className = 'px-6 py-3 text-sm font-medium border-b-2 border-teal-500 text-teal-600 dark:text-teal-400 bg-white dark:bg-gray-800 focus:outline-none flex items-center';
+        btnMaterials.className = 'px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-teal-600 dark:hover:text-teal-400 bg-white dark:bg-gray-800 focus:outline-none flex items-center';
+      } else {
+        btnMaterials.className = 'px-6 py-3 text-sm font-medium border-b-2 border-teal-500 text-teal-600 dark:text-teal-400 bg-white dark:bg-gray-800 focus:outline-none flex items-center';
+        btnDetails.className = 'px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-teal-600 dark:hover:text-teal-400 bg-white dark:bg-gray-800 focus:outline-none flex items-center';
+      }
+    }
+  }
+
+  async function loadDetailMaterials(actId) {
+    const listEl = document.getElementById('detail-mat-list');
+    const countEl = document.getElementById('detail-mat-count');
+    const manageLink = document.getElementById('mat-manage-link');
+    if (manageLink) manageLink.href = `/course-materials.html?activity_id=${encodeURIComponent(actId)}`;
+    if (!listEl) return;
+
+    try {
+      const res = await fetch(`/api/activities/${encodeURIComponent(actId)}/materials`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load materials');
+      const mats = data.materials || [];
+      if (countEl) countEl.textContent = `(${mats.length})`;
+      if (!mats.length) {
+        listEl.innerHTML = '<p class="text-sm text-gray-500 dark:text-gray-400 italic">No materials uploaded yet.</p>';
+        return;
+      }
+      listEl.innerHTML = mats.slice(0, 5).map(m => `
+        <div class="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
+          <div class="min-w-0 pr-3">
+            <p class="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">${esc(m.title)}</p>
+            ${m.description ? `<p class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">${esc(m.description)}</p>` : ''}
+          </div>
+          <button onclick="downloadDetailMaterial('${esc(actId)}', '${esc(m.id)}')" class="shrink-0 px-3 py-1.5 rounded-md bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold transition flex items-center gap-1">
+            <i class="fas fa-download"></i> Download
+          </button>
+        </div>
+      `).join('');
+    } catch (_) {
+      if (listEl) listEl.innerHTML = '<p class="text-sm text-red-500">Failed to load materials.</p>';
+    }
+  }
+
+  async function downloadDetailMaterial(actId, mid) {
+    if (!token) {
+      alert('Please log in to download materials.');
+      window.location.href = '/login';
+      return;
+    }
+    try {
+      const res = await fetch(`/api/activities/${encodeURIComponent(actId)}/materials/${encodeURIComponent(mid)}/download`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Download failed');
+      const payload = data.data || data;
+      let url = payload.download_url || '';
+      const filename = payload.filename || payload.title || 'download';
+      if (url.startsWith('/api/r2/')) {
+        const proxied = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!proxied.ok) throw new Error('Download failed');
+        const blob = await proxied.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(objectUrl);
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } catch (e) {
+      alert(e.message || 'Download failed');
+    }
   }
 
   function renderSessions(data) {

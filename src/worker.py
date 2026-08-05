@@ -1093,6 +1093,21 @@ _DDL = [
     "CREATE INDEX IF NOT EXISTS idx_message_requests_to_user ON message_requests(to_user_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_message_requests_from_user ON message_requests(from_user_id)",
     "CREATE INDEX IF NOT EXISTS idx_message_requests_activity ON message_requests(activity_id)",
+    # Course materials (A2 module)
+    """CREATE TABLE IF NOT EXISTS course_materials (
+        id          TEXT PRIMARY KEY,
+        activity_id TEXT NOT NULL,
+        title       TEXT NOT NULL,
+        description TEXT,
+        file_key    TEXT NOT NULL,
+        uploaded_by TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+        FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_materials_activity ON course_materials(activity_id)",
+    "CREATE INDEX IF NOT EXISTS idx_materials_uploader ON course_materials(uploaded_by)",
+    "CREATE INDEX IF NOT EXISTS idx_materials_created  ON course_materials(activity_id, created_at DESC)",
 ]
 
 
@@ -7668,6 +7683,101 @@ async def _dispatch(request, env):
         if m_thread_send and method == "POST":
             return await api_send_thread_message(request, env, m_thread_send.group(1))
         # --- END NEW ---
+
+        # Course Materials (A2 module)
+        m_mat_list = re.fullmatch(r"/api/activities/([A-Za-z0-9_-]+)/materials", path)
+        if m_mat_list:
+            from api.materials import list_materials, upload_material  # noqa: PLC0415
+            if method == "GET":
+                return await list_materials(m_mat_list.group(1), request, env)
+            if method == "POST":
+                return await upload_material(m_mat_list.group(1), request, env)
+
+        m_mat_download = re.fullmatch(
+            r"/api/activities/([A-Za-z0-9_-]+)/materials/([A-Za-z0-9_-]+)/download", path
+        )
+        if m_mat_download and method == "GET":
+            from api.materials import download_material  # noqa: PLC0415
+            return await download_material(m_mat_download.group(1), m_mat_download.group(2), request, env)
+
+        m_mat_item = re.fullmatch(
+            r"/api/activities/([A-Za-z0-9_-]+)/materials/([A-Za-z0-9_-]+)", path
+        )
+        if m_mat_item and method == "DELETE":
+            from api.materials import delete_material  # noqa: PLC0415
+            return await delete_material(m_mat_item.group(1), m_mat_item.group(2), request, env)
+        if m_mat_item and method == "PATCH":
+            from api.materials import update_material  # noqa: PLC0415
+            return await update_material(m_mat_item.group(1), m_mat_item.group(2), request, env)
+
+        # R2 object proxy – fallback download when presigned URLs aren't available
+        # Matches /api/r2/<anything> (the key may contain slashes)
+        if path.startswith("/api/r2/") and method == "GET":
+            r2_key = path[len("/api/r2/"):]
+            # Only allow course-material keys under the expected prefix
+            if not r2_key.startswith("materials/"):
+                return err("Invalid R2 key", 400)
+            # Accept token from Authorization header OR ?token= query param
+            # (browser <a> navigation can't set headers, so we allow query param)
+            auth_header = request.headers.get("Authorization") or ""
+            if not auth_header:
+                qs_params = parse_qs(urlparse(request.url).query)
+                token_param = (qs_params.get("token") or [None])[0]
+                if token_param:
+                    auth_header = token_param
+            user = verify_token(auth_header, env.JWT_SECRET)
+            if not user:
+                return err("Authentication required", 401)
+            try:
+                env_dict = getattr(env, "__dict__", {})
+                if "MY_BUCKET" in env_dict:
+                    r2_bucket = env_dict["MY_BUCKET"]
+                elif "R2_BUCKET" in env_dict:
+                    r2_bucket = env_dict["R2_BUCKET"]
+                elif "R2" in env_dict:
+                    r2_bucket = env_dict["R2"]
+                else:
+                    r2_bucket = (
+                        getattr(env, "MY_BUCKET", None)
+                        or getattr(env, "R2_BUCKET", None)
+                        or getattr(env, "R2", None)
+                    )
+                if not r2_bucket:
+                    return err("R2 storage not configured", 500)
+                obj = await r2_bucket.get(r2_key)
+                if obj is None:
+                    return err("File not found", 404)
+                try:
+                    from pyodide.ffi import to_js  # noqa: PLC0415
+                    import js                       # noqa: PLC0415
+                    body_bytes = bytes(js.Uint8Array.new(await obj.arrayBuffer()))
+                except ImportError:
+                    body_bytes = await obj.arrayBuffer()
+                ct = (getattr(obj, "httpMetadata", None) and
+                      getattr(obj.httpMetadata, "contentType", None)) or "application/octet-stream"
+                # R2 key format: materials/{act_id}/{uuid}_{original_filename}
+                # Strip the UUID prefix (36 chars) + underscore to get original name
+                raw_name = r2_key.split("/")[-1]
+                filename = raw_name[37:] if len(raw_name) > 37 else raw_name
+                try:
+                    import js as _js  # noqa: PLC0415
+                    from pyodide.ffi import to_js as _to_js  # noqa: PLC0415
+                    headers = _to_js({
+                        "Content-Type": ct,
+                        "Content-Disposition": f'attachment; filename="{filename}"',
+                        "Cache-Control": "private, max-age=3600",
+                    }, dict_converter=_js.Object.fromEntries)
+                    return _js.Response.new(
+                        _to_js(body_bytes, create_pyproxies=False),
+                        _to_js({"status": 200, "headers": headers},
+                               dict_converter=_js.Object.fromEntries),
+                    )
+                except ImportError:
+                    # Unit-test / non-CF environment
+                    return json_resp({"error": "R2 proxy not available in this environment"}, 501)
+            except Exception as exc:
+                await capture_exception(exc, request, env, "r2_proxy")
+                return err("Failed to retrieve file", 500)
 
         # Notifications
         if path == "/api/notifications" and method == "GET":

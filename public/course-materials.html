@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Course Materials - Alpha One Labs</title>
+  <link rel="icon" type="image/png" href="/images/logo.png" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: {} } };
+    (function () {
+      if (localStorage.getItem('darkMode') === 'true') {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+
+  <style>
+    html, body { overflow-x: hidden; box-sizing: border-box; }
+    .dark { color-scheme: dark; }
+    :root  { color-scheme: light; }
+    .gradient-hero {
+      background: linear-gradient(135deg, #0F766E 0%, #0D9488 50%, #06B6D4 100%);
+    }
+    #upload-progress-bar { transition: width 0.3s ease; }
+    .material-card { transition: transform 0.15s, box-shadow 0.15s; }
+    .material-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.10); }
+    #toast { transition: opacity .3s ease, transform .3s ease; }
+    #toast.hidden { opacity: 0; transform: translateY(16px); pointer-events: none; }
+  </style>
+</head>
+
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col">
+
+  <!-- Navbar -->
+  <nav class="gradient-hero shadow-lg">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2 text-white font-bold text-lg">
+        <img src="/images/logo.png" alt="Logo" class="w-8 h-8" />
+        Alpha One Labs
+      </a>
+      <div class="flex items-center gap-4">
+        <a href="/activity.html" class="text-white/80 hover:text-white text-sm">
+          <i class="fas fa-arrow-left mr-1"></i>Back to Activities
+        </a>
+        <button type="button" id="dark-toggle" class="text-white/80 hover:text-white text-sm" title="Toggle dark mode">
+          <i class="fas fa-moon"></i>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="gradient-hero text-white py-10 px-4">
+    <div class="max-w-4xl mx-auto">
+      <div class="flex items-center gap-3 mb-2">
+        <i class="fas fa-folder-open text-3xl opacity-80"></i>
+        <h1 class="text-3xl font-bold" id="page-title">Course Materials</h1>
+      </div>
+      <p class="text-white/70 text-sm" id="activity-subtitle">Loading activity&hellip;</p>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="flex-1 max-w-4xl mx-auto w-full px-4 py-8 space-y-8">
+
+    <!-- Upload form (shown only when authenticated) -->
+    <section id="upload-section" class="hidden bg-white dark:bg-gray-800 rounded-2xl shadow p-6">
+      <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+        <i class="fas fa-upload text-teal-600"></i> Upload New Material
+      </h2>
+
+      <form id="upload-form" class="space-y-4" novalidate>
+        <div>
+          <label for="mat-title" class="block text-sm font-medium mb-1">
+            Title <span class="text-red-500">*</span>
+          </label>
+          <input id="mat-title" type="text" placeholder="e.g. Week 1 Lecture Slides" maxlength="200"
+            class="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2
+                   bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500 text-sm" />
+        </div>
+
+        <div>
+          <label for="mat-desc" class="block text-sm font-medium mb-1">Description</label>
+          <textarea id="mat-desc" rows="2" placeholder="Optional short description&hellip;" maxlength="500"
+            class="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2
+                   bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500 text-sm resize-none"></textarea>
+        </div>
+
+        <div>
+           <label for="mat-file" class="block text-sm font-medium mb-1">
+             File <span class="text-red-500">*</span>
+           </label>
+          <div id="drop-zone"
+            class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6
+                   text-center cursor-pointer hover:border-teal-500 transition-colors">
+            <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i>
+            <p class="text-sm text-gray-500 dark:text-gray-400">
+              Drag &amp; drop a file here, or
+              <button type="button" class="text-teal-600 font-medium underline cursor-pointer focus:outline-none" id="browse-link">browse</button>
+            </p>
+            <p id="selected-file-name" class="mt-2 text-xs text-teal-700 dark:text-teal-400 font-medium hidden"></p>
+             <input id="mat-file" type="file" class="hidden" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip" />
+          </div>
+        </div>
+
+        <!-- Progress bar -->
+        <div id="upload-progress" class="hidden">
+          <div class="flex justify-between text-xs text-gray-500 mb-1">
+            <span>Uploading&hellip;</span>
+            <span id="upload-pct">0%</span>
+          </div>
+          <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div id="upload-progress-bar" class="bg-teal-500 h-2 rounded-full" style="width:0%"></div>
+          </div>
+        </div>
+
+        <p id="upload-error" class="text-red-500 text-sm hidden"></p>
+
+        <button type="submit" id="upload-btn"
+          class="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-4
+                 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm">
+          <i class="fas fa-upload mr-2"></i>Upload Material
+        </button>
+      </form>
+    </section>
+
+    <!-- Materials list -->
+    <section>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold flex items-center gap-2">
+          <i class="fas fa-file-alt text-teal-600"></i>
+          Materials
+          <span id="materials-count" class="text-sm font-normal text-gray-500 dark:text-gray-400"></span>
+        </h2>
+        <button type="button" id="refresh-btn" class="text-sm text-teal-600 hover:text-teal-700 flex items-center gap-1" title="Refresh">
+          <i class="fas fa-sync-alt"></i>
+        </button>
+      </div>
+
+      <div id="materials-loading" class="space-y-3">
+        <div class="animate-pulse bg-white dark:bg-gray-800 rounded-xl h-20 shadow"></div>
+        <div class="animate-pulse bg-white dark:bg-gray-800 rounded-xl h-20 shadow"></div>
+        <div class="animate-pulse bg-white dark:bg-gray-800 rounded-xl h-20 shadow"></div>
+      </div>
+
+      <div id="materials-empty" class="hidden text-center py-16 text-gray-400 dark:text-gray-500">
+        <i class="fas fa-folder-open text-5xl mb-4 opacity-40"></i>
+        <p class="text-lg font-medium">No materials yet</p>
+        <p class="text-sm mt-1">Upload the first file using the form above.</p>
+      </div>
+
+      <div id="materials-error" class="hidden text-center py-12 text-red-500">
+        <i class="fas fa-exclamation-triangle text-4xl mb-3 opacity-60"></i>
+        <p class="font-medium">Failed to load materials</p>
+        <p id="materials-error-msg" class="text-sm mt-1 text-gray-500"></p>
+      </div>
+
+      <ul id="materials-list" class="space-y-3 hidden"></ul>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="text-center text-xs text-gray-400 dark:text-gray-600 py-6">
+    &copy; 2024 Alpha One Labs
+  </footer>
+
+  <!-- Toast -->
+  <div id="toast"
+    class="hidden fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3
+           rounded-xl shadow-xl text-white text-sm font-medium max-w-xs">
+    <i id="toast-icon" class="fas fa-check-circle text-lg"></i>
+    <span id="toast-msg"></span>
+  </div>
+
+  <!-- Confirm modal -->
+  <div id="confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 max-w-sm w-full">
+      <h3 id="confirm-modal-title" class="font-semibold text-lg mb-2">Delete Material</h3>
+      <p id="confirm-msg" class="text-sm text-gray-600 dark:text-gray-300 mb-6">
+        Are you sure you want to delete this material? This action cannot be undone.
+      </p>
+      <div class="flex gap-3 justify-end">
+        <button type="button" id="confirm-cancel"
+          class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600
+                 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+          Cancel
+        </button>
+        <button type="button" id="confirm-ok"
+          class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors">
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- App script -->
+  <script>
+  (function () {
+    'use strict';
+
+    var API_BASE = '';
+    var activityId = null;
+    var authToken = null;
+    var currentUser = null;
+    var isActivityHost = false;
+    var pendingDeleteId = null;
+
+    function el(id) { return document.getElementById(id); }
+
+    var pageTitle        = el('page-title');
+    var activitySubtitle = el('activity-subtitle');
+    var uploadSection    = el('upload-section');
+    var uploadForm       = el('upload-form');
+    var matTitle         = el('mat-title');
+    var matDesc          = el('mat-desc');
+    var matFile          = el('mat-file');
+    var dropZone         = el('drop-zone');
+    var browseLink       = el('browse-link');
+    var selectedFileName = el('selected-file-name');
+    var uploadProgress   = el('upload-progress');
+    var uploadProgressBar = el('upload-progress-bar');
+    var uploadPct        = el('upload-pct');
+    var uploadError      = el('upload-error');
+    var uploadBtn        = el('upload-btn');
+    var refreshBtn       = el('refresh-btn');
+    var materialsLoading = el('materials-loading');
+    var materialsEmpty   = el('materials-empty');
+    var materialsError   = el('materials-error');
+    var materialsErrorMsg = el('materials-error-msg');
+    var materialsList    = el('materials-list');
+    var materialsCount   = el('materials-count');
+    var toast            = el('toast');
+    var toastIcon        = el('toast-icon');
+    var toastMsg         = el('toast-msg');
+    var confirmModal     = el('confirm-modal');
+    var confirmMsg       = el('confirm-msg');
+    var confirmCancel    = el('confirm-cancel');
+    var confirmOk        = el('confirm-ok');
+    var darkToggle       = el('dark-toggle');
+
+    // Dark mode
+    darkToggle.addEventListener('click', function () {
+      var isDark = document.documentElement.classList.toggle('dark');
+      localStorage.setItem('darkMode', isDark ? 'true' : 'false');
+    });
+
+    // Toast
+    var toastTimer = null;
+    function showToast(msg, type) {
+      type = type || 'success';
+      var colours = { success: 'bg-teal-600', error: 'bg-red-600', info: 'bg-blue-600' };
+      var icons   = { success: 'fa-check-circle', error: 'fa-exclamation-circle', info: 'fa-info-circle' };
+      toast.className = 'fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-xl text-white text-sm font-medium max-w-xs ' + (colours[type] || colours.success);
+      toastIcon.className = 'fas ' + (icons[type] || icons.success) + ' text-lg';
+      toastMsg.textContent = msg;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () { toast.classList.add('hidden'); }, 3500);
+    }
+
+    // Confirm modal
+    function openConfirm(title, mid) {
+      pendingDeleteId = mid;
+      confirmMsg.textContent = 'Are you sure you want to delete "' + title + '"? This action cannot be undone.';
+      confirmModal.classList.remove('hidden');
+    }
+    confirmCancel.addEventListener('click', function () {
+      confirmModal.classList.add('hidden');
+      pendingDeleteId = null;
+    });
+    confirmOk.addEventListener('click', function () {
+      confirmModal.classList.add('hidden');
+      if (pendingDeleteId) {
+        deleteMaterial(pendingDeleteId);
+        pendingDeleteId = null;
+      }
+    });
+
+    // Auth
+    function loadAuth() {
+      try {
+        authToken = localStorage.getItem('edu_token') || localStorage.getItem('token') || null;
+        var raw = localStorage.getItem('edu_user') || localStorage.getItem('user');
+        currentUser = raw ? JSON.parse(raw) : null;
+        if (authToken && !localStorage.getItem('edu_token')) {
+          localStorage.setItem('edu_token', authToken);
+        }
+        if (currentUser && !localStorage.getItem('edu_user')) {
+          localStorage.setItem('edu_user', JSON.stringify(currentUser));
+        }
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      } catch (e) {
+        authToken = null;
+        currentUser = null;
+      }
+    }
+
+    function authHeaders() {
+      var h = {};
+      if (authToken) { h['Authorization'] = 'Bearer ' + authToken; }
+      return h;
+    }
+
+    function getActivityId() {
+      var params = new URLSearchParams(window.location.search);
+      return params.get('activity_id') || params.get('id') || null;
+    }
+
+    // API helpers
+    function fetchMaterials() {
+      return fetch(API_BASE + '/api/activities/' + activityId + '/materials', {
+        headers: authHeaders()
+      }).then(function (res) {
+        return res.json().then(function (body) {
+          if (!res.ok) { throw new Error(body.error || 'HTTP ' + res.status); }
+          return body;
+        });
+      });
+    }
+
+    function uploadMaterial(formData) {
+      return fetch(API_BASE + '/api/activities/' + activityId + '/materials', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: formData
+      }).then(function (res) {
+        return res.json().then(function (body) {
+          if (!res.ok) { throw new Error(body.error || 'HTTP ' + res.status); }
+          return body;
+        });
+      });
+    }
+
+    function deleteMaterial(mid) {
+      return fetch(API_BASE + '/api/activities/' + activityId + '/materials/' + mid, {
+        method: 'DELETE',
+        headers: authHeaders()
+      }).then(function (res) {
+        return res.json().then(function (body) {
+          if (!res.ok) { throw new Error(body.error || 'HTTP ' + res.status); }
+          return body;
+        });
+      }).then(function () {
+        showToast('Material deleted successfully');
+        loadMaterials();
+      }).catch(function (e) {
+        showToast(e.message || 'Delete failed', 'error');
+      });
+    }
+
+    function downloadMaterial(mid) {
+      fetch(API_BASE + '/api/activities/' + activityId + '/materials/' + mid + '/download', {
+        headers: authHeaders()
+      }).then(function (res) {
+        return res.json().then(function (body) {
+          if (!res.ok) { throw new Error(body.error || 'HTTP ' + res.status); }
+          return body;
+        });
+      }).then(function (body) {
+        var data = body.data || body;
+        var url = data && data.download_url;
+        var filename = (data && (data.filename || data.title)) || 'download';
+        if (!url) { throw new Error('No download URL returned'); }
+
+        // For /api/r2/ proxy URLs, avoid putting tokens in query params.
+        if (url.indexOf('/api/r2/') === 0 && authToken) {
+          return fetch(url, { headers: authHeaders() })
+            .then(function (res2) {
+              if (!res2.ok) { throw new Error('Download failed'); }
+              return res2.blob();
+            }).then(function (blob) {
+              var objectUrl = URL.createObjectURL(blob);
+              var a = document.createElement('a');
+              a.href = objectUrl;
+              a.download = filename;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(objectUrl);
+            });
+        }
+
+        var a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }).catch(function (e) {
+        showToast(e.message || 'Download failed', 'error');
+      });
+    }
+
+    // Render helpers
+    function escHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatDate(iso) {
+      if (!iso) { return ''; }
+      try {
+        return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      } catch (e) { return iso; }
+    }
+
+    function renderMaterial(mat) {
+      var li = document.createElement('li');
+      li.className = 'material-card bg-white dark:bg-gray-800 rounded-xl shadow px-5 py-4 flex items-start gap-4';
+      li.dataset.id = mat.id;
+
+      var isOwner = currentUser && (mat.uploaded_by === currentUser.id);
+      var canDelete = isOwner || isActivityHost;
+      var safeId = escHtml(mat.id);
+
+      var deleteBtn = canDelete
+        ? '<button class="delete-btn inline-flex items-center gap-1.5 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors" data-id="' + safeId + '" data-title="' + escHtml(mat.title) + '" title="Delete"><i class="fas fa-trash-alt"></i><span class="hidden sm:inline ml-1">Delete</span></button>'
+        : '';
+
+      var descHtml = mat.description
+        ? '<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">' + escHtml(mat.description) + '</p>'
+        : '';
+
+      li.innerHTML =
+        '<div class="flex-shrink-0 mt-1"><i class="fas fa-file-alt text-2xl text-gray-400"></i></div>' +
+        '<div class="flex-1 min-w-0">' +
+          '<p class="font-semibold text-sm truncate" title="' + escHtml(mat.title) + '">' + escHtml(mat.title) + '</p>' +
+          descHtml +
+          '<p class="text-xs text-gray-400 dark:text-gray-500 mt-1"><i class="fas fa-calendar-alt mr-1"></i>' + formatDate(mat.created_at) + '</p>' +
+        '</div>' +
+          '<div class="flex-shrink-0 flex items-center gap-2">' +
+          '<button class="download-btn inline-flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors" data-id="' + safeId + '" title="Download"><i class="fas fa-download"></i><span class="hidden sm:inline ml-1">Download</span></button>' +
+          deleteBtn +
+        '</div>';
+
+      li.querySelector('.download-btn').addEventListener('click', function () {
+        downloadMaterial(mat.id);
+      });
+
+      var delEl = li.querySelector('.delete-btn');
+      if (delEl) {
+        delEl.addEventListener('click', function () {
+          openConfirm(mat.title, mat.id);
+        });
+      }
+
+      return li;
+    }
+
+    // Load & render
+    function loadMaterials() {
+      materialsLoading.classList.remove('hidden');
+      materialsEmpty.classList.add('hidden');
+      materialsError.classList.add('hidden');
+      materialsList.classList.add('hidden');
+      materialsList.innerHTML = '';
+
+      fetchMaterials().then(function (data) {
+        var items = data.materials || [];
+        materialsLoading.classList.add('hidden');
+        materialsCount.textContent = '(' + items.length + ')';
+
+        if (items.length === 0) {
+          materialsEmpty.classList.remove('hidden');
+          return;
+        }
+
+        items.forEach(function (mat) {
+          materialsList.appendChild(renderMaterial(mat));
+        });
+        materialsList.classList.remove('hidden');
+      }).catch(function (e) {
+        materialsLoading.classList.add('hidden');
+        materialsError.classList.remove('hidden');
+        materialsErrorMsg.textContent = e.message || 'Unknown error';
+      });
+    }
+
+    // Upload form
+    function setUploadError(msg) {
+      uploadError.textContent = msg;
+      uploadError.classList.toggle('hidden', !msg);
+    }
+
+    function setUploading(active) {
+      uploadBtn.disabled = active;
+      uploadProgress.classList.toggle('hidden', !active);
+      if (active) {
+        uploadProgressBar.style.width = '0%';
+        uploadPct.textContent = '0%';
+      }
+    }
+
+    function animateProgress() {
+      // Simulated progress – avoids showing a static bar for small uploads.
+      var pct = 0;
+      var iv = setInterval(function () {
+        pct = Math.min(pct + Math.random() * 15, 90);
+        uploadProgressBar.style.width = pct + '%';
+        uploadPct.textContent = Math.round(pct) + '%';
+      }, 200);
+      return function () {
+        clearInterval(iv);
+        uploadProgressBar.style.width = '100%';
+        uploadPct.textContent = '100%';
+      };
+    }
+
+    uploadForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      setUploadError('');
+
+      var title = matTitle.value.trim();
+      var desc  = matDesc.value.trim();
+      var file  = matFile.files[0];
+
+      if (!title) { setUploadError('Title is required.'); return; }
+      if (!file)  { setUploadError('Please select a file to upload.'); return; }
+
+      // Client-side size guard to fail fast on very large files.
+      var MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB – keep in sync with backend
+      if (file.size > MAX_FILE_SIZE) {
+        setUploadError('File is too large. Maximum size is 50MB.');
+        return;
+      }
+
+      var fd = new FormData();
+      fd.append('title', title);
+      fd.append('description', desc);
+      fd.append('file', file, file.name);
+
+      setUploading(true);
+      var stopProgress = animateProgress();
+
+      uploadMaterial(fd).then(function () {
+        stopProgress();
+        setUploading(false);
+        uploadForm.reset();
+        selectedFileName.classList.add('hidden');
+        showToast('Material uploaded successfully!');
+        loadMaterials();
+      }).catch(function (err) {
+        stopProgress();
+        setUploading(false);
+        setUploadError(err.message || 'Upload failed. Please try again.');
+      });
+    });
+
+    // Drag & drop / file picker
+    browseLink.addEventListener('click', function () { matFile.click(); });
+    dropZone.addEventListener('click', function (e) {
+      if (e.target !== browseLink) { matFile.click(); }
+    });
+
+    matFile.addEventListener('change', function () {
+      var f = matFile.files[0];
+      if (f) {
+        selectedFileName.textContent = 'Selected: ' + f.name + ' (' + (f.size / 1024).toFixed(1) + ' KB)';
+        selectedFileName.classList.remove('hidden');
+      }
+    });
+
+    dropZone.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      dropZone.classList.add('border-teal-500', 'bg-teal-50', 'dark:bg-teal-900/10');
+    });
+    dropZone.addEventListener('dragleave', function () {
+      dropZone.classList.remove('border-teal-500', 'bg-teal-50', 'dark:bg-teal-900/10');
+    });
+    var droppedFile = null;
+
+    dropZone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      dropZone.classList.remove('border-teal-500', 'bg-teal-50', 'dark:bg-teal-900/10');
+      var f = e.dataTransfer.files[0];
+      if (f) {
+        try {
+          var dt = new DataTransfer();
+          dt.items.add(f);
+          matFile.files = dt.files;
+          droppedFile = null;
+        } catch (ex) {
+          // Safari fallback – DataTransfer not supported, remember dropped file
+          droppedFile = f;
+        }
+        selectedFileName.textContent = 'Selected: ' + f.name + ' (' + (f.size / 1024).toFixed(1) + ' KB)';
+        selectedFileName.classList.remove('hidden');
+      }
+    });
+
+    refreshBtn.addEventListener('click', function () { loadMaterials(); });
+
+    // Close confirm modal on Escape
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') { return; }
+      if (!confirmModal.classList.contains('hidden')) {
+        confirmModal.classList.add('hidden');
+        pendingDeleteId = null;
+      }
+    });
+
+    // Load activity title and host permissions
+    function loadActivityTitle() {
+      fetch(API_BASE + '/api/activities/' + activityId, { headers: authHeaders() })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          var title = data.activity && data.activity.title;
+          if (title) {
+            pageTitle.textContent = 'Materials \u2013 ' + title;
+            activitySubtitle.textContent = 'Activity ID: ' + activityId;
+            document.title = title + ' \u2013 Materials | Alpha One Labs';
+          }
+          isActivityHost = !!data.is_host;
+          // Only show upload form if current user is the activity host/creator
+          if (authToken && isActivityHost) {
+            uploadSection.classList.remove('hidden');
+          } else {
+            uploadSection.classList.add('hidden');
+          }
+        })
+        .catch(function () { /* non-critical */ });
+    }
+
+    // Bootstrap
+    function init() {
+      loadAuth();
+      activityId = getActivityId();
+
+      if (!activityId) {
+        activitySubtitle.textContent = 'No activity selected. Add ?activity_id=\u2026 to the URL.';
+        materialsLoading.classList.add('hidden');
+        materialsError.classList.remove('hidden');
+        materialsErrorMsg.textContent = 'Missing activity_id query parameter.';
+        return;
+      }
+
+      loadActivityTitle();
+      loadMaterials();
+    }
+
+    init();
+  }());
+  </script>
+</body>
+</html>
