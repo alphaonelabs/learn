@@ -26,72 +26,56 @@
   </script>
 
   <style>
-    html, body { overflow-x: hidden; box-sizing: border-box; }
+    html, body {
+      overflow-x: hidden;
+      box-sizing: border-box;
+    }
+    
     .dark { color-scheme: dark; }
-    :root  { color-scheme: light; }
-
+    :root { color-scheme: light; }
+    
     .gradient-hero {
       background: linear-gradient(135deg, #0F766E 0%, #0D9488 50%, #06B6D4 100%);
     }
-    .badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 9999px;
-      font-size: 0.75rem;
-      font-weight: 600;
+    
+    .gradient-hero.dark {
+      background: linear-gradient(135deg, #134E4A 0%, #0F766E 50%, #164E63 100%);
     }
-    .card-hover { transition: transform 0.2s, box-shadow 0.2s; }
-    .card-hover:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,0.12); }
-    .tag-pill { cursor: pointer; transition: background 0.15s; }
-    .tag-pill.active { background: #0F766E; color: #fff; }
+
+    .badge { 
+      display: inline-block; 
+      padding: 4px 12px; 
+      border-radius: 9999px; 
+      font-size: 0.75rem; 
+      font-weight: 600; 
+    }
+
+    .card-hover { 
+      transition: transform 0.2s, box-shadow 0.2s; 
+    }
+    
+    .card-hover:hover { 
+      transform: translateY(-4px); 
+      box-shadow: 0 12px 30px rgba(0,0,0,0.12); 
+    }
+
+    .tag-pill { 
+      cursor: pointer; 
+      transition: background 0.15s; 
+    }
+    
+    .tag-pill.active { 
+      background: #0F766E; 
+      color: #fff; 
+    }
 
     /* View modes */
     .view-browser { display: block; }
-    .view-detail  { display: none; }
+    .view-detail { display: none; }
     .view-browser.hidden { display: none; }
     .view-detail.active { display: block; }
     .activity-detail-route .view-browser { display: none; }
     .activity-detail-route .view-detail { display: block; }
-    .view-detail.active  { display: block; }
-
-    /* Tab system */
-    .tab-btn {
-      position: relative;
-      padding: 0.75rem 1.25rem;
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: #6b7280;
-      border-bottom: 3px solid transparent;
-      border-top: none; border-left: none; border-right: none;
-      transition: color 0.15s, border-color 0.15s;
-      white-space: nowrap;
-      cursor: pointer;
-      background: none;
-    }
-    .dark .tab-btn { color: #9ca3af; }
-    .tab-btn:hover { color: #0d9488; }
-    .dark .tab-btn:hover { color: #2dd4bf; }
-    .tab-btn.active { color: #0d9488; border-bottom-color: #0d9488; }
-    .dark .tab-btn.active { color: #2dd4bf; border-bottom-color: #2dd4bf; }
-    .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
-
-    /* Material card */
-    .material-card { transition: transform 0.15s, box-shadow 0.15s; }
-    .material-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.10); }
-
-    /* Upload progress */
-    #mat-upload-progress-bar { transition: width 0.3s ease; }
-
-    /* Toast */
-    #act-toast { transition: opacity .3s ease, transform .3s ease; }
-    #act-toast.hidden { opacity: 0; transform: translateY(16px); pointer-events: none; }
-
-    /* Drop zone drag-over */
-    #mat-drop-zone.drag-over {
-      border-color: #0d9488;
-      background-color: rgba(13,148,136,0.05);
-    }
   </style>
 {% endblock %}
 {% block content %}
@@ -103,11 +87,11 @@
 
     <!-- ===== HERO SECTION ===== -->
     <section class="gradient-hero text-white py-4 md:py-5 relative overflow-hidden">
-    <section class="gradient-hero text-white py-16 md:py-20 relative overflow-hidden">
       <div class="absolute inset-0 pointer-events-none select-none opacity-10" aria-hidden="true">
         <i class="fas fa-book-open absolute top-4 left-8 text-4xl"></i>
         <i class="fas fa-users absolute bottom-4 right-10 text-4xl"></i>
       </div>
+
       <div class="relative max-w-[90rem] mx-auto px-4 md:px-6">
         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
           <div>
@@ -164,7 +148,10 @@
       </div>
     </section>
 
+    <!-- ===== MAIN CONTENT ===== -->
     <main class="flex-1 max-w-[90rem] mx-auto w-full px-4 md:px-6 py-12">
+
+      <!-- Tag cloud -->
       <div id="tag-cloud" class="flex flex-wrap gap-2 mb-8"></div>
 
       <!-- Activity grid -->
@@ -179,12 +166,12 @@
         </div>
       </nav>
 
-      <div id="activity-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8"></div>
       <p id="no-results" class="hidden text-center text-gray-400 dark:text-gray-500 py-16 text-lg">
         <i class="fas fa-search text-4xl mb-4 block opacity-50"></i>
         No activities found matching your filters.
       </p>
     </main>
+
   </div>
 
   <!-- ==================== DETAIL VIEW ==================== -->
@@ -210,26 +197,6 @@
         <aside class="space-y-4">
           <div class="aspect-square w-full relative overflow-hidden rounded-lg shadow-md bg-gray-100 dark:bg-gray-900">
             <img id="act-main-image" src="/images/logo.png" alt="Activity image" class="w-full h-full object-cover" width="500" height="500" loading="eager" decoding="async">
-    <!-- Hero -->
-    <section class="gradient-hero text-white py-14 relative overflow-hidden">
-      <div class="absolute inset-0 pointer-events-none select-none opacity-10" aria-hidden="true">
-        <i class="fas fa-book-open absolute top-10 left-10 text-6xl"></i>
-        <i class="fas fa-users absolute bottom-10 right-10 text-6xl"></i>
-      </div>
-      <div class="relative max-w-[90rem] mx-auto px-4 md:px-6">
-          <nav class="text-teal-100 text-sm mb-6 flex items-center gap-2">
-          <button type="button" onclick="backToBrowser()" class="hover:text-white transition flex items-center gap-1">
-            <i class="fas fa-arrow-left"></i>Activities
-          </button>
-          <span>/</span>
-          <span id="crumb-title" class="text-teal-50">Loading...</span>
-        </nav>
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-          <div class="lg:col-span-2">
-            <h1 id="act-title" class="text-4xl md:text-5xl font-extrabold text-white leading-tight mb-4">Loading...</h1>
-            <p id="act-meta" class="text-lg text-teal-100 mb-6">Loading metadata...</p>
-            <div id="act-badges" class="flex flex-wrap gap-2 mb-6"></div>
-            <div id="act-action"></div>
           </div>
 
           <!-- Quick Stats -->
@@ -256,69 +223,31 @@
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20">
               <h2 class="font-bold text-gray-800 dark:text-gray-200 flex items-center">
                 <i class="fas fa-calendar mr-2 text-teal-600 dark:text-teal-400"></i>Activity Sessions
-          <div class="lg:col-span-1">
-            <div class="bg-white/10 dark:bg-black/30 backdrop-blur-lg border border-white/20 rounded-2xl p-6 text-white">
-              <h3 class="font-bold text-lg mb-4 flex items-center">
-                <i class="fas fa-info-circle mr-2"></i>Quick Info
-              </h3>
-              <div id="act-details" class="space-y-3 text-sm"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Tab Bar -->
-    <div class="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-20 shadow-sm">
-      <div class="max-w-[90rem] mx-auto px-4 md:px-6">
-        <div class="flex gap-0 overflow-x-auto" id="tab-bar" role="tablist">
-          <button type="button" class="tab-btn active" data-tab="overview" onclick="switchTab('overview')" role="tab">
-            <i class="fas fa-home mr-2"></i>Overview
-          </button>
-          <button type="button" class="tab-btn" data-tab="sessions" onclick="switchTab('sessions')" role="tab">
-            <i class="fas fa-calendar mr-2"></i>Sessions
-            <span id="tab-sessions-count" class="ml-1.5 text-xs bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300 px-1.5 py-0.5 rounded-full hidden"></span>
-          </button>
-          <button type="button" class="tab-btn" data-tab="materials" onclick="switchTab('materials')" role="tab">
-            <i class="fas fa-folder-open mr-2"></i>Materials
-            <span id="tab-materials-count" class="ml-1.5 text-xs bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded-full hidden"></span>
-          </button>
-          <button type="button" class="tab-btn" data-tab="host" onclick="switchTab('host')" role="tab">
-            <i class="fas fa-user-tie mr-2"></i>About Host
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab Panels -->
-    <main class="flex-1 max-w-[90rem] mx-auto w-full px-4 md:px-6 py-8">
-
-      <!-- ── OVERVIEW TAB ── -->
-      <div id="tab-overview" class="tab-panel active">
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <aside class="lg:col-span-1 space-y-6">
-            <!-- About -->
-            <div class="rounded-2xl p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-md">
-              <h2 class="font-bold text-lg text-gray-800 dark:text-gray-200 mb-4 flex items-center">
-                <i class="fas fa-file-alt mr-2 text-teal-600 dark:text-teal-400"></i>About
               </h2>
-              <p id="act-description" class="text-gray-600 dark:text-gray-300 text-sm leading-relaxed mb-4">Loading description...</p>
-              <div id="act-tags" class="flex flex-wrap gap-2"></div>
+              <span id="sessions-count" class="text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 px-2.5 py-1 rounded-full font-semibold"></span>
             </div>
-            <!-- Similar -->
-            <div id="similar-card" class="rounded-2xl overflow-hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-md">
-              <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20">
-                <h2 class="font-bold text-gray-800 dark:text-gray-200 flex items-center">
-                  <i class="fas fa-star mr-2 text-purple-600 dark:text-purple-400"></i>Similar Activities
-                </h2>
-              </div>
-              <ul id="similar-list" class="divide-y divide-gray-200 dark:divide-gray-700 max-h-[50vh] overflow-y-auto">
-                <li class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                  <i class="fas fa-spinner fa-spin"></i>Loading...
-                </li>
-              </ul>
+            <ul id="sessions-list" class="divide-y divide-gray-200 dark:divide-gray-700 max-h-[60vh] overflow-y-auto">
+              <li class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                <i class="fas fa-spinner fa-spin"></i>Loading sessions...
+              </li>
+            </ul>
+          </div>
+
+          <!-- Similar Activities Card -->
+          <div id="similar-card" class="rounded-lg overflow-hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-md">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20">
+              <h2 class="font-bold text-gray-800 dark:text-gray-200 flex items-center">
+                <i class="fas fa-star mr-2 text-purple-600 dark:text-purple-400"></i>Similar Activities
+              </h2>
             </div>
-          </aside>
+            <ul id="similar-list" class="divide-y divide-gray-200 dark:divide-gray-700 max-h-[50vh] overflow-y-auto">
+              <li class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                <i class="fas fa-spinner fa-spin"></i>Loading...
+              </li>
+            </ul>
+          </div>
+
+        </aside>
 
         <!-- Main Content Area -->
         <div class="md:col-span-2 space-y-6">
@@ -420,164 +349,13 @@
             </div>
           </section>
 
-          <div class="lg:col-span-2 space-y-6">
-            <!-- Not Joined CTA -->
-            <div id="join-cta" class="hidden rounded-2xl p-8 bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 border border-teal-200 dark:border-teal-800 text-center">
-              <div class="text-5xl mb-4">🔒</div>
-              <h3 class="font-bold text-2xl text-gray-800 dark:text-gray-200 mb-2">Join to Access Details</h3>
-              <p class="text-gray-600 dark:text-gray-300 text-sm mb-6 max-w-sm mx-auto">
-                Session locations and descriptions are encrypted and only revealed to participants.
-              </p>
-               <button type="button" id="btn-join" onclick="joinActivity()"
-                class="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white font-bold px-8 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all">
-                <i class="fas fa-user-plus mr-2"></i>Join Activity - Free
-              </button>
-            </div>
-            <!-- Member Card -->
-            <div id="member-card" class="hidden rounded-2xl p-6 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
-              <h2 class="font-bold text-lg text-green-800 dark:text-green-300 mb-4 flex items-center">
-                <i class="fas fa-check-circle mr-2"></i>Your Participation
-              </h2>
-              <div id="enr-details" class="flex flex-wrap gap-3 text-sm"></div>
-            </div>
-            <!-- Welcome -->
-            <div id="welcome-card" class="rounded-2xl p-8 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-md">
-              <h2 class="font-bold text-2xl text-gray-800 dark:text-gray-200 mb-4 flex items-center">
-                <i class="fas fa-star mr-2 text-yellow-500"></i>Welcome!
-              </h2>
-              <p id="welcome-text" class="text-gray-600 dark:text-gray-300 text-base leading-relaxed">Loading welcome message...</p>
-            </div>
-          </div>
         </div>
-      </div>
 
-      <!-- ── SESSIONS TAB ── -->
-      <div id="tab-sessions" class="tab-panel">
-        <div class="max-w-3xl">
-          <div id="sessions-empty" class="hidden text-center py-16 text-gray-400 dark:text-gray-500">
-            <i class="fas fa-calendar-times text-5xl mb-4 opacity-40"></i>
-            <p class="text-lg font-medium">No sessions scheduled yet</p>
-          </div>
-          <ul id="sessions-list-tab" class="space-y-4"></ul>
-        </div>
-      </div>
-
-      <!-- ── MATERIALS TAB ── -->
-      <div id="tab-materials" class="tab-panel">
-        <div class="max-w-3xl space-y-6">
-
-          <!-- Host-only upload form -->
-          <div id="mat-upload-section" class="hidden bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 p-6">
-            <h2 class="text-lg font-bold mb-5 flex items-center gap-2 text-gray-800 dark:text-gray-200">
-              <i class="fas fa-upload text-teal-600 dark:text-teal-400"></i>Upload New Material
-            </h2>
-            <form id="mat-upload-form" class="space-y-4" novalidate>
-              <div>
-                <label for="mat-title" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-                  Title <span class="text-red-500">*</span>
-                </label>
-                <input id="mat-title" type="text" placeholder="e.g. Week 1 Lecture Slides" maxlength="200"
-                  class="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500 text-sm" />
-              </div>
-              <div>
-                <label for="mat-desc" class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Description</label>
-                <textarea id="mat-desc" rows="2" placeholder="Optional short description…" maxlength="500"
-                  class="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-teal-500 text-sm resize-none"></textarea>
-              </div>
-              <div>
-                <label class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-                  File <span class="text-red-500">*</span>
-                </label>
-                <div id="mat-drop-zone"
-                  class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center cursor-pointer hover:border-teal-500 transition-colors">
-                  <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i>
-                  <p class="text-sm text-gray-500 dark:text-gray-400">
-                    Drag &amp; drop a file here, or
-                    <span class="text-teal-600 dark:text-teal-400 font-medium underline cursor-pointer" id="mat-browse-link">browse</span>
-                  </p>
-                  <p id="mat-selected-file" class="mt-2 text-xs text-teal-700 dark:text-teal-400 font-medium hidden"></p>
-                  <input id="mat-file-input" type="file" class="hidden" />
-                </div>
-              </div>
-              <div id="mat-upload-progress" class="hidden">
-                <div class="flex justify-between text-xs text-gray-500 mb-1">
-                  <span>Uploading…</span><span id="mat-upload-pct">0%</span>
-                </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div id="mat-upload-progress-bar" class="bg-teal-500 h-2 rounded-full" style="width:0%"></div>
-                </div>
-              </div>
-              <p id="mat-upload-error" class="text-red-500 text-sm hidden"></p>
-              <button type="submit" id="mat-upload-btn"
-                class="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2.5 px-4 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2">
-                <i class="fas fa-upload"></i>Upload Material
-              </button>
-            </form>
-          </div>
-
-          <!-- List header -->
-          <div class="flex items-center justify-between">
-            <h2 class="text-lg font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
-              <i class="fas fa-file-alt text-teal-600 dark:text-teal-400"></i>
-              Course Materials
-              <span id="mat-count-label" class="text-sm font-normal text-gray-500 dark:text-gray-400"></span>
-            </h2>
-            <button type="button" onclick="loadMaterials()" title="Refresh"
-              class="text-sm text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 flex items-center gap-1 transition-colors">
-              <i class="fas fa-sync-alt"></i>
-            </button>
-          </div>
-
-          <!-- Loading skeleton -->
-          <div id="mat-loading" class="space-y-3">
-            <div class="animate-pulse bg-white dark:bg-gray-800 rounded-xl h-20 shadow border border-gray-100 dark:border-gray-700"></div>
-            <div class="animate-pulse bg-white dark:bg-gray-800 rounded-xl h-20 shadow border border-gray-100 dark:border-gray-700"></div>
-            <div class="animate-pulse bg-white dark:bg-gray-800 rounded-xl h-20 shadow border border-gray-100 dark:border-gray-700"></div>
-          </div>
-
-          <!-- Empty state -->
-          <div id="mat-empty" class="hidden text-center py-16 text-gray-400 dark:text-gray-500">
-            <i class="fas fa-folder-open text-5xl mb-4 opacity-40"></i>
-            <p class="text-lg font-medium">No materials yet</p>
-            <p class="text-sm mt-1" id="mat-empty-sub">Check back later for course materials.</p>
-          </div>
-
-          <!-- Error state -->
-          <div id="mat-error" class="hidden text-center py-12 text-red-500">
-            <i class="fas fa-exclamation-triangle text-4xl mb-3 opacity-60"></i>
-            <p class="font-medium">Failed to load materials</p>
-            <p id="mat-error-msg" class="text-sm mt-1 text-gray-500"></p>
-          </div>
-
-          <!-- Materials list -->
-          <ul id="mat-list" class="space-y-3 hidden"></ul>
-
-        </div>
-      </div>
-
-      <!-- ── ABOUT HOST TAB ── -->
-      <div id="tab-host" class="tab-panel">
-        <div class="max-w-2xl">
-          <div class="rounded-2xl p-8 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-md">
-            <h2 class="font-bold text-lg text-gray-800 dark:text-gray-200 mb-6 flex items-center">
-              <i class="fas fa-user-tie mr-2 text-teal-600 dark:text-teal-400"></i>Activity Host
-            </h2>
-            <div class="flex items-center gap-5">
-              <div id="host-avatar"
-                class="w-16 h-16 rounded-full bg-gradient-to-br from-teal-400 to-cyan-500 flex items-center justify-center text-white text-2xl font-bold shrink-0">
-                ?
-              </div>
-              <div>
-                <p id="host-name-tab" class="font-semibold text-gray-800 dark:text-gray-200 text-xl">Loading…</p>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Activity Host</p>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
         </div>
       </section>
     </main>
+
   </div>
 <script>
     const API = '';

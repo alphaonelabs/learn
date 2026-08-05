@@ -7729,7 +7729,22 @@ async def _dispatch(request, env):
             if not user:
                 return err("Authentication required", 401)
             try:
-                obj = await env.R2_BUCKET.get(r2_key)
+                env_dict = getattr(env, "__dict__", {})
+                if "MY_BUCKET" in env_dict:
+                    r2_bucket = env_dict["MY_BUCKET"]
+                elif "R2_BUCKET" in env_dict:
+                    r2_bucket = env_dict["R2_BUCKET"]
+                elif "R2" in env_dict:
+                    r2_bucket = env_dict["R2"]
+                else:
+                    r2_bucket = (
+                        getattr(env, "MY_BUCKET", None)
+                        or getattr(env, "R2_BUCKET", None)
+                        or getattr(env, "R2", None)
+                    )
+                if not r2_bucket:
+                    return err("R2 storage not configured", 500)
+                obj = await r2_bucket.get(r2_key)
                 if obj is None:
                     return err("File not found", 404)
                 try:

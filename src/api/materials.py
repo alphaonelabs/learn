@@ -126,6 +126,25 @@ async def _parse_multipart(req):
     return fields, None
 
 
+def _r2_bucket(env):
+    """Return the R2 bucket binding (supports MY_BUCKET, R2_BUCKET, or R2)."""
+    env_dict = getattr(env, "__dict__", {})
+    if "MY_BUCKET" in env_dict:
+        return env_dict["MY_BUCKET"]
+    if "R2_BUCKET" in env_dict:
+        return env_dict["R2_BUCKET"]
+    if "R2" in env_dict:
+        return env_dict["R2"]
+    bucket = (
+        getattr(env, "MY_BUCKET", None)
+        or getattr(env, "R2_BUCKET", None)
+        or getattr(env, "R2", None)
+    )
+    if bucket is None:
+        raise AttributeError("No R2 bucket binding found on env (checked MY_BUCKET, R2_BUCKET, R2).")
+    return bucket
+
+
 async def _upload_to_r2(env, key: str, data: bytes, content_type: str = "application/octet-stream",
                         original_filename: str = ""):
     """Upload *data* to R2 under *key*.
@@ -134,9 +153,10 @@ async def _upload_to_r2(env, key: str, data: bytes, content_type: str = "applica
     that presigned download URLs automatically serve the correct filename and
     MIME type without needing a proxy.
 
-    Uses ``env.R2_BUCKET.put(key, data, options)`` which is the standard
+    Uses ``_r2_bucket(env).put(key, data, options)`` which is the standard
     Cloudflare Workers R2 binding API.
     """
+    bucket = _r2_bucket(env)
     try:
         from pyodide.ffi import to_js  # noqa: PLC0415 – CF runtime only
         import js                       # noqa: PLC0415
@@ -155,16 +175,17 @@ async def _upload_to_r2(env, key: str, data: bytes, content_type: str = "applica
             {"httpMetadata": http_meta},
             dict_converter=js.Object.fromEntries,
         )
-        await env.R2_BUCKET.put(key, to_js(data, create_pyproxies=False), options)
+        await bucket.put(key, to_js(data, create_pyproxies=False), options)
     except ImportError:
-        # Unit-test environment: env.R2_BUCKET is a MagicMock / AsyncMock.
-        await env.R2_BUCKET.put(key, data)
+        # Unit-test environment: bucket is a MagicMock / AsyncMock.
+        await bucket.put(key, data)
 
 
 async def _delete_from_r2(env, key: str):
     """Delete the object at *key* from R2 (best-effort; errors are swallowed)."""
     try:
-        await env.R2_BUCKET.delete(key)
+        bucket = _r2_bucket(env)
+        await bucket.delete(key)
     except Exception as exc:
         w = _worker()
         await w.capture_exception(exc, _env=env, where="materials._delete_from_r2")
@@ -179,8 +200,9 @@ async def _generate_download_url(env, key: str) -> str:
     worker can proxy.
     """
     try:
+        bucket = _r2_bucket(env)
         # CF Workers R2 binding: bucket.createPresignedUrl(key, {expiresIn})
-        url = await env.R2_BUCKET.createPresignedUrl(key, {"expiresIn": 3600})
+        url = await bucket.createPresignedUrl(key, {"expiresIn": 3600})
         return str(url)
     except Exception:
         pass
@@ -255,10 +277,10 @@ async def upload_material(activity_id: str, req, env):
     if not user:
         return w.err("Authentication required", 401)
 
-    # Validate activity exists
+    # Validate activity exists and user is host
     try:
         act = await env.DB.prepare(
-            "SELECT id FROM activities WHERE id = ?"
+            "SELECT id, host_id FROM activities WHERE id = ?"
         ).bind(activity_id).first()
     except Exception as exc:
         await w.capture_exception(exc, req, env, "materials.upload.activity_lookup")
@@ -266,6 +288,10 @@ async def upload_material(activity_id: str, req, env):
 
     if not act:
         return w.err("Activity not found", 404)
+
+    host_id = getattr(act, "host_id", None)
+    if host_id and host_id != user["id"]:
+        return w.err("Only the activity creator can upload materials", 403)
 
     # Parse multipart body
     fields, parse_err = await _parse_multipart(req)

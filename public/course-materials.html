@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Course Materials - Alpha One Labs</title>
-  <link rel="icon" type="image/png" href="https://alphaonelabs.com/static/images/logo.png" />
+  <link rel="icon" type="image/png" href="/images/logo.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
 
@@ -38,7 +38,7 @@
   <nav class="gradient-hero shadow-lg">
     <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
       <a href="/" class="flex items-center gap-2 text-white font-bold text-lg">
-        <img src="https://alphaonelabs.com/static/images/logo.png" alt="Logo" class="w-8 h-8" />
+        <img src="/images/logo.png" alt="Logo" class="w-8 h-8" />
         Alpha One Labs
       </a>
       <div class="flex items-center gap-4">
@@ -606,7 +606,7 @@
       }
     });
 
-    // Load activity title
+    // Load activity title and host permissions
     function loadActivityTitle() {
       fetch(API_BASE + '/api/activities/' + activityId, { headers: authHeaders() })
         .then(function (res) { return res.json(); })
@@ -616,6 +616,12 @@
             pageTitle.textContent = 'Materials \u2013 ' + title;
             activitySubtitle.textContent = 'Activity ID: ' + activityId;
             document.title = title + ' \u2013 Materials | Alpha One Labs';
+          }
+          // Only show upload form if current user is the activity host/creator
+          if (authToken && data.is_host) {
+            uploadSection.classList.remove('hidden');
+          } else {
+            uploadSection.classList.add('hidden');
           }
         })
         .catch(function () { /* non-critical */ });
@@ -632,11 +638,6 @@
         materialsError.classList.remove('hidden');
         materialsErrorMsg.textContent = 'Missing activity_id query parameter.';
         return;
-      }
-
-      // Show upload form only when logged in
-      if (authToken) {
-        uploadSection.classList.remove('hidden');
       }
 
       loadActivityTitle();

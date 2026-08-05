@@ -1,4 +1,4 @@
--- Migration 0006: Add course_materials table for activity file attachments
+-- Migration 0015: Add course_materials table for activity file attachments
 
 CREATE TABLE IF NOT EXISTS course_materials (
     id          TEXT PRIMARY KEY,
