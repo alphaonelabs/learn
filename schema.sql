@@ -185,6 +185,5 @@ CREATE TABLE IF NOT EXISTS course_materials (
     FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_materials_activity ON course_materials(activity_id);
 CREATE INDEX IF NOT EXISTS idx_materials_uploader ON course_materials(uploaded_by);
 CREATE INDEX IF NOT EXISTS idx_materials_created  ON course_materials(activity_id, created_at DESC);

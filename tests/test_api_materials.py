@@ -260,8 +260,14 @@ class TestUploadMaterial:
         resp = await materials.upload_material(ACTIVITY_ID, req, env)
         assert resp.status == 404
 
+    async def test_non_host_upload_returns_403(self):
+        env = _make_env_with_r2(db=MockDB([make_stmt(first=MockRow(id=ACTIVITY_ID, host_id=OTHER_USER_ID))]))
+        req = self._upload_req(uid=USER_ID)
+        resp = await materials.upload_material(ACTIVITY_ID, req, env)
+        assert resp.status == 403
+
     async def test_missing_title_returns_400(self):
-        env = _make_env_with_r2(db=MockDB([make_stmt(first=MockRow(id=ACTIVITY_ID))]))
+        env = _make_env_with_r2(db=MockDB([make_stmt(first=MockRow(id=ACTIVITY_ID, host_id=USER_ID))]))
         body = {"description": "no title", "file": {"filename": "f.pdf", "bytes": [1, 2, 3]}}
         req = MockRequest(
             method="POST",
@@ -745,7 +751,7 @@ class TestHelpers:
         long_name = "a" * 300 + ".pdf"
         key = materials._r2_key("act-1", long_name)
         # The filename portion after the UUID_ prefix should be ≤ 128 chars
-        filename_part = key.split("/")[-1].split("_", 5)[-1]
+        filename_part = key.split("/")[-1].split("_", 1)[-1]
         assert len(filename_part) <= 128
 
     def test_r2_key_unique_per_call(self):

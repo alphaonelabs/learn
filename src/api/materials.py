@@ -30,6 +30,12 @@ def _worker():
     return importlib.import_module("worker")
 
 
+def _filename_from_key(file_key: str) -> str:
+    """Extract original filename from R2 key (materials/{act_id}/{uuid}_{filename})."""
+    raw_name = file_key.split("/")[-1]
+    return raw_name[37:] if len(raw_name) > 37 else raw_name
+
+
 def _new_id() -> str:
     """Generate a UUID-v4 using os.urandom (no stdlib uuid needed)."""
     b = bytearray(os.urandom(16))
@@ -333,6 +339,11 @@ async def upload_material(activity_id: str, req, env):
     if not file_bytes:
         return w.err("Uploaded file is empty", 400)
 
+    # 50MB file size guard
+    MAX_FILE_SIZE = 50 * 1024 * 1024
+    if len(file_bytes) > MAX_FILE_SIZE:
+        return w.err("File size exceeds 50MB limit", 400)
+
     # Build R2 key and upload
     r2_key = _r2_key(activity_id, filename)
     try:
@@ -469,8 +480,8 @@ async def update_material(activity_id: str, mid: str, req, env):
     if parse_err:
         return parse_err
 
-    title       = (body.get("title") or "").strip()
-    description = (body.get("description") or "").strip()
+    title       = (body.get("title") or "").strip() if isinstance(body.get("title"), str) else ""
+    description = (body.get("description") or "").strip() if isinstance(body.get("description"), str) else ""
 
     if not title:
         return w.err("title is required", 400)
@@ -525,9 +536,7 @@ async def download_material(activity_id: str, mid: str, req, env):
         return w.err("Failed to generate download URL", 500)
 
     # Derive the original filename from the R2 key
-    # Key format: materials/{activity_id}/{uuid}_{original_filename}
-    raw_name = row.file_key.split("/")[-1]
-    original_filename = raw_name[37:] if len(raw_name) > 37 else raw_name
+    original_filename = _filename_from_key(row.file_key)
 
     return w.ok(
         {

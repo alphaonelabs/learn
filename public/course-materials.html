@@ -99,7 +99,7 @@
             <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i>
             <p class="text-sm text-gray-500 dark:text-gray-400">
               Drag &amp; drop a file here, or
-              <span class="text-teal-600 font-medium underline cursor-pointer" id="browse-link">browse</span>
+              <button type="button" class="text-teal-600 font-medium underline cursor-pointer focus:outline-none" id="browse-link">browse</button>
             </p>
             <p id="selected-file-name" class="mt-2 text-xs text-teal-700 dark:text-teal-400 font-medium hidden"></p>
              <input id="mat-file" type="file" class="hidden" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip" />
@@ -206,6 +206,7 @@
     var activityId = null;
     var authToken = null;
     var currentUser = null;
+    var isActivityHost = false;
     var pendingDeleteId = null;
 
     function el(id) { return document.getElementById(id); }
@@ -418,9 +419,10 @@
       li.dataset.id = mat.id;
 
       var isOwner = currentUser && (mat.uploaded_by === currentUser.id);
+      var canDelete = isOwner || isActivityHost;
       var safeId = escHtml(mat.id);
 
-      var deleteBtn = isOwner
+      var deleteBtn = canDelete
         ? '<button class="delete-btn inline-flex items-center gap-1.5 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors" data-id="' + safeId + '" data-title="' + escHtml(mat.title) + '" title="Delete"><i class="fas fa-trash-alt"></i><span class="hidden sm:inline ml-1">Delete</span></button>'
         : '';
 
@@ -617,8 +619,9 @@
             activitySubtitle.textContent = 'Activity ID: ' + activityId;
             document.title = title + ' \u2013 Materials | Alpha One Labs';
           }
+          isActivityHost = !!data.is_host;
           // Only show upload form if current user is the activity host/creator
-          if (authToken && data.is_host) {
+          if (authToken && isActivityHost) {
             uploadSection.classList.remove('hidden');
           } else {
             uploadSection.classList.add('hidden');
