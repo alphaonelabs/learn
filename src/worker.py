@@ -1099,34 +1099,7 @@ _MIME = {
 
 
 async def serve_static(path: str, env):
-    if path in ("/", ""):
-        key = "index.html"
-    else:
-        key = path.lstrip("/")
-        if "." not in key.split("/")[-1]:
-            key += ".html"
-
-    try:
-        content = await env.__STATIC_CONTENT.get(key, "text")
-    except Exception:
-        content = None
-
-    if content is None:
-        try:
-            content = await env.__STATIC_CONTENT.get("index.html", "text")
-        except Exception:
-            content = None
-
-    if content is None:
-        return Response(
-            "<h1>404 - Not Found</h1>",
-            status=404,
-            headers={"Content-Type": "text/html"},
-        )
-
-    ext  = key.rsplit(".", 1)[-1] if "." in key else "html"
-    mime = _MIME.get(ext, "text/plain")
-    return Response(content, headers={"Content-Type": mime, **_CORS})
+    return await env.ASSETS.fetch(f"http://fake-host{path}")
 
 
 # ---------------------------------------------------------------------------
@@ -1209,3 +1182,4 @@ async def on_fetch(request, env):
     except Exception as e:
         capture_exception(e, request, env, "on_fetch_unhandled")
         return err("Internal server error", 500)
+
