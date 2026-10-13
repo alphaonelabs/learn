@@ -52,6 +52,10 @@ import js
 from pyodide.ffi import to_js
 from js import WebSocketPair, WebSocketRequestResponsePair
 import uuid
+try:
+    from chat_do import ChatDO
+except ImportError:
+    from src.chat_do import ChatDO as ChatDO
 
 _SENTRY_INITIALIZED = False
 _SENTRY_DSN: str = ""
@@ -1058,7 +1062,7 @@ _DDL = [
         updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )""",
-    # Email verification tokens (token_hash = SHA-256 of plaintext token)
+    # Email verification tokens
     """CREATE TABLE IF NOT EXISTS email_verification_tokens (
         id         TEXT PRIMARY KEY,
         user_id    TEXT NOT NULL,
@@ -1068,7 +1072,7 @@ _DDL = [
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )""",
     "CREATE INDEX IF NOT EXISTS idx_evtoken_user ON email_verification_tokens(user_id)",
-    # Password reset tokens (token_hash = SHA-256 of plaintext token)
+    # Password reset tokens
     """CREATE TABLE IF NOT EXISTS password_reset_tokens (
         id         TEXT PRIMARY KEY,
         user_id    TEXT NOT NULL,
@@ -1093,6 +1097,16 @@ _DDL = [
     "CREATE INDEX IF NOT EXISTS idx_message_requests_to_user ON message_requests(to_user_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_message_requests_from_user ON message_requests(from_user_id)",
     "CREATE INDEX IF NOT EXISTS idx_message_requests_activity ON message_requests(activity_id)",
+    # Chat messages
+    """CREATE TABLE IF NOT EXISTS chat_message (
+        id           TEXT PRIMARY KEY,
+        classroom_id TEXT NOT NULL,
+        user_id      TEXT NOT NULL,
+        display_name TEXT,
+        content      TEXT NOT NULL,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_chat_created   ON chat_message(classroom_id, created_at)",
 ]
 
 
@@ -6183,75 +6197,9 @@ class ClassroomDO(DurableObject):
             }), exclude_session_id=sid)
 
         elif msg_type == "chat_message":
-            raw_text = data.get("text", "")
-            if not isinstance(raw_text, str):
-                return
-            text = raw_text.strip()[:500]
-            if not text:
-                return
-            raw_timestamp = data.get("timestamp", "")
-            timestamp = raw_timestamp[:64] if isinstance(raw_timestamp, str) else ""
-            self._broadcast(json.dumps({
-                "type":           "chat_message",
-                "participant_id": info["participant_id"],
-                "display_name":   info["display_name"],
-                "text":           text,
-                "timestamp":      timestamp,
-            }))
+            # chat_message is handled by ChatDO (/ws/chat/:id).
+            pass
 
-        elif msg_type == "whiteboard_event":
-            event = self._sanitize_whiteboard_event(data.get("event") if isinstance(data.get("event"), dict) else data)
-            if not event:
-                return
-            event["participant_id"] = info["participant_id"]
-            event["display_name"] = info["display_name"]
-            event["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            try:
-                events = await self.ctx.storage.get("whiteboard_events")
-                if not isinstance(events, list):
-                    events = []
-                events.append(event)
-                events = events[-1000:]
-                await self.ctx.storage.put("whiteboard_events", events)
-            except Exception as exc:
-                await capture_exception(exc, None, self.env, "classroom.whiteboard_event.persist")
-            self._broadcast(json.dumps({
-                "type": "whiteboard_event",
-                "event": event,
-            }))
-
-        elif msg_type == "whiteboard_clear":
-            try:
-                await self.ctx.storage.put("whiteboard_events", [])
-            except Exception as exc:
-                await capture_exception(exc, None, self.env, "classroom.whiteboard_clear.persist")
-            self._broadcast(json.dumps({
-                "type": "whiteboard_clear",
-                "participant_id": info["participant_id"],
-                "display_name": info["display_name"],
-            }))
-
-        elif msg_type == "whiteboard_undo":
-            try:
-                events = await self.ctx.storage.get("whiteboard_events")
-                if not isinstance(events, list):
-                    events = []
-                for idx in range(len(events) - 1, -1, -1):
-                    event = events[idx]
-                    if isinstance(event, dict) and event.get("participant_id") == info["participant_id"]:
-                        events.pop(idx)
-                        break
-                await self.ctx.storage.put("whiteboard_events", events)
-                self._broadcast(json.dumps({
-                    "type": "whiteboard_state",
-                    "events": events[-1000:],
-                    "participant_id": info["participant_id"],
-                    "display_name": info["display_name"],
-                }))
-            except Exception as exc:
-                await capture_exception(exc, None, self.env, "classroom.whiteboard_undo")
-
-        
         elif msg_type == "update_seat":
             # Classroom layout, keep in sync with DESK_ROWS/DESK_COLS in classroom_poc.html
             DESK_ROWS = 3
@@ -6534,7 +6482,8 @@ class PresenceDO(DurableObject):
             user_id = str(authenticated_user.get("id", ""))
             display_name = str(authenticated_user.get("username") or user_id)
         else:
-            if token_param or not user_param:
+            allow_anon = str(getattr(self.env, "ALLOW_ANON_PRESENCE", None) or getattr(self.env, "ALLOW_ANON_CLASSROOM_POC", "")).lower() in {"1", "true", "yes"}
+            if token_param or not allow_anon or not user_param:
                 return Response(
                     json.dumps({"error": "Authentication required"}),
                     status=401,
@@ -6557,15 +6506,7 @@ class PresenceDO(DurableObject):
 
         session_id = str(uuid.uuid4())
         existing = self.presence.get(user_id)
-        if not can_interact:
-            existing = {
-                "x": 0.5,
-                "y": 0.5,
-                "emoji": "",
-                "hand_raised": False,
-                "display_name": display_name,
-            }
-        elif existing is None:
+        if existing is None:
             existing = {
                 "x": 0.5,
                 "y": 0.5,
@@ -6586,7 +6527,7 @@ class PresenceDO(DurableObject):
             "y": existing["y"],
             "emoji": existing["emoji"],
             "hand_raised": existing["hand_raised"],
-            "can_interact": can_interact,
+            "can_interact": True,
         })
         server.serializeAttachment(attachment)
 
@@ -6594,23 +6535,22 @@ class PresenceDO(DurableObject):
             "ws": server,
             "user_id": user_id,
             "display_name": display_name,
-            "can_interact": can_interact,
+            "can_interact": True,
         }
 
         self._send_welcome(server, session_id, user_id)
-        if can_interact:
-            self._broadcast(
-                json.dumps({
-                    "type": "delta",
-                    "user_id": user_id,
-                    "display_name": display_name,
-                    "x": existing["x"],
-                    "y": existing["y"],
-                    "emoji": existing["emoji"],
-                    "hand_raised": existing["hand_raised"],
-                }),
-                exclude_session_id=session_id,
-            )
+        self._broadcast(
+            json.dumps({
+                "type": "delta",
+                "user_id": user_id,
+                "display_name": display_name,
+                "x": existing["x"],
+                "y": existing["y"],
+                "emoji": existing["emoji"],
+                "hand_raised": existing["hand_raised"],
+            }),
+            exclude_session_id=session_id,
+        )
 
         return Response(None, status=101, web_socket=client)
 
@@ -7492,6 +7432,17 @@ async def _dispatch(request, env):
         except Exception as e:
             await capture_exception(e, request, env, "presence_do_dispatch")
             return err("Failed to connect to presence channel", 500)
+
+    m_chat = re.fullmatch(r"/ws/chat/([A-Za-z0-9_-]+)", path)
+    if m_chat:
+        room_id = m_chat.group(1)
+        try:
+            do_id = env.CHAT_DO.idFromName(room_id)
+            stub = env.CHAT_DO.get(do_id)
+            return await stub.fetch(request)
+        except Exception as e:
+            await capture_exception(e, request, env, "chat_do_dispatch")
+            return err("Failed to connect to chat channel", 500)
 
     if path.startswith("/api/"):
         if path == "/api/init" and method == "POST":
