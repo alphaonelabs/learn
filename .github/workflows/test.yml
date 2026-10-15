@@ -18,5 +18,9 @@ jobs:
           node-version: '22'
       - name: Python syntax check
         run: python -m py_compile src/worker.py
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio
+      - name: Run unit tests
+        run: pytest -q
       - name: Wrangler dry run
         run: npx wrangler deploy --dry-run --outdir /tmp/wrangler-dry-run

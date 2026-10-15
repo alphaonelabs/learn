@@ -3,7 +3,9 @@ Tests for api_admin_table_counts() and admin-path access in _dispatch().
 """
 
 import json
-from tests.helpers import load_worker, MockRequest, MockRow, MockDB, make_env, make_stmt, basic_auth_header
+from tests.helpers import (
+    load_worker, MockRequest, MockRow, MockDB, make_env, make_stmt, basic_auth_header, make_init_db_stmts
+)
 
 worker = load_worker()
 
@@ -85,9 +87,7 @@ class TestApiAdminTableCounts:
                 make_stmt(all_results=[tables_row]),  # initial sqlite_master query
                 failing_count_stmt,                   # initial users count fails
             ]
-            + [make_stmt() for _ in range(ddl_count)]  # init_db DDL statements
-            + [make_stmt(), make_stmt()]               # init_db: email_verified ALTER + UPDATE
-            + [make_stmt() for _ in range(8)]          # init_db: profile-fields ALTERs (0004)
+            + await make_init_db_stmts(worker)        # init_db statements
             + [
                 make_stmt(all_results=[tables_row]),  # retried sqlite_master query
                 make_stmt(first=count_row),           # retried users count succeeds
