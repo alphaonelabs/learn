@@ -5831,6 +5831,36 @@ async def api_create_learning_intent(req, env):
     ).run()
     return ok({"id": intent_id}, "Request posted")
 
+async def api_delete_learning_intent(req, env, intent_id):
+    """DELETE /api/intents/:id — delete a request owned by the caller."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+
+    try:
+        intent = await env.DB.prepare(
+            "SELECT id, user_id FROM learning_intents WHERE id=? LIMIT 1"
+        ).bind(intent_id).first()
+    except Exception as exc:
+        await capture_exception(exc, req, env, "api_delete_learning_intent.lookup")
+        return err("Could not delete request — please try again", 500)
+
+    if not intent:
+        return err("Request not found", 404)
+
+    if intent.user_id != user["id"]:
+        return err("You can only delete your own requests", 403)
+
+    try:
+        await env.DB.prepare(
+            "DELETE FROM learning_intents WHERE id=? AND user_id=?"
+        ).bind(intent_id, user["id"]).run()
+    except Exception as exc:
+        await capture_exception(exc, req, env, "api_delete_learning_intent")
+        return err("Could not delete request — please try again", 500)
+
+    return ok({"id": intent_id}, "Request deleted successfully")
+
 
 async def api_admin_table_counts(req, env):
     if not _is_basic_auth_valid(req, env):
@@ -8218,6 +8248,12 @@ async def _dispatch(request, env):
             return await api_list_learning_intents(request, env)
         if path == "/api/intents" and method == "POST":
             return await api_create_learning_intent(request, env)
+
+        m_intent = re.fullmatch(r"/api/intents/([A-Za-z0-9_-]+)", path)
+        if m_intent and method == "DELETE":
+            return await api_delete_learning_intent(
+                request, env, m_intent.group(1)
+            )
 
         if path in ("/api/features", "/api/legacy-features") and method == "GET":
             return await api_features(request, env)
