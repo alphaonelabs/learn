@@ -47,6 +47,7 @@
             <option value="circle">Circle</option>
             <option value="text">Text</option>
             <option value="arrow">Arrow</option>
+            <option value="move">Move</option>
           </select>
 
           <div class="grid grid-cols-2 gap-3 mb-4">
@@ -63,6 +64,7 @@
             <button type="button" data-tool="highlighter" class="tool-button rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm font-bold hover:bg-gray-50 dark:hover:bg-gray-800" aria-pressed="false">Highlighter</button>
             <button type="button" data-tool="eraser" class="tool-button rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm font-bold hover:bg-gray-50 dark:hover:bg-gray-800" aria-pressed="false">Eraser</button>
             <button type="button" data-tool="text" class="tool-button rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm font-bold hover:bg-gray-50 dark:hover:bg-gray-800" aria-pressed="false">Text</button>
+            <button type="button" data-tool="move" class="tool-button rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm font-bold hover:bg-gray-50 dark:hover:bg-gray-800" aria-pressed="false">Move</button>
           </div>
         </div>
 
@@ -108,9 +110,14 @@
           <div id="coordinates" class="rounded-lg bg-gray-100 dark:bg-gray-800 px-3 py-1 text-xs font-mono text-gray-600 dark:text-gray-300">x: 0, y: 0</div>
         </div>
         <div class="overflow-auto bg-slate-100 dark:bg-slate-950 p-3">
-          <canvas id="whiteboard" width="1500" height="800" class="block rounded-2xl border border-gray-300 bg-white shadow-sm">
-            Your browser does not support the HTML5 canvas.
-          </canvas>
+          <div id="canvasWrap" class="relative w-full" style="max-width:1500px">
+            <canvas id="whiteboard" width="1500" height="800" class="block w-full h-auto rounded-2xl border border-gray-300 bg-white shadow-sm">
+              Your browser does not support the HTML5 canvas.
+            </canvas>
+            <textarea id="textEditor" rows="1" placeholder="Type, Enter to place"
+              class="hidden absolute m-0 p-0 border-0 resize-none overflow-hidden bg-white/70"
+              style="outline:2px dashed #14b8a6;font-family:sans-serif;line-height:1.25;"></textarea>
+          </div>
         </div>
       </section>
     </div>
@@ -123,6 +130,12 @@
   const canInteract = Boolean(token);
   const canvas = document.getElementById('whiteboard');
   const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  // Separate layer for drawings so the eraser never cuts through the background/image.
+  const layer = document.createElement('canvas');
+  layer.width = W; layer.height = H;
+  const lctx = layer.getContext('2d');
+
   const roomInput = document.getElementById('room');
   const statusEl = document.getElementById('status');
   const viewerNote = document.getElementById('viewer-note');
@@ -136,6 +149,8 @@
   const activeUsers = document.getElementById('activeUsers');
   const activeCount = document.getElementById('active-count');
   const coordinates = document.getElementById('coordinates');
+  const textEditor = document.getElementById('textEditor');
+
   let ws = null;
   let currentParticipantId = '';
   let events = [];
@@ -144,24 +159,24 @@
   let drawing = false;
   let startPoint = null;
   let lastPoint = null;
+  let strokePoints = [];
   let draftEvent = null;
+  let drag = null;            // active move-drag
+  let editorPoint = null;     // where the text editor is open (normalized)
   let uploadedImage = null;
   let imageDataUrl = '';
-  let imageScale = 1;
+  let imageScale = 1, imageX = 0, imageY = 0;   // image position in canvas pixels
 
-  function esc(value) {
-    return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const SHAPES = ['line', 'rectangle', 'circle', 'arrow'];
+  const PEN_TOOLS = ['pen', 'eraser', 'highlighter'];
+
+  function esc(v) {
+    return String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
-
   function preserveWhiteboardRedirect() {
     sessionStorage.setItem('post_login_redirect', location.pathname + location.search);
   }
-
-  function loginForWhiteboard() {
-    preserveWhiteboardRedirect();
-    window.location.href = '/login';
-  }
-
+  function loginForWhiteboard() { preserveWhiteboardRedirect(); window.location.href = '/login'; }
   function viewerId() {
     try {
       let id = localStorage.getItem('classroom_participant_id');
@@ -170,225 +185,280 @@
         localStorage.setItem('classroom_participant_id', id);
       }
       return id;
-    } catch (_) {
-      return String(Date.now()) + Math.random().toString(16).slice(2);
-    }
+    } catch (_) { return String(Date.now()) + Math.random().toString(16).slice(2); }
   }
-
   function eventId() {
     try { return crypto.randomUUID().replace(/[^A-Za-z0-9_-]/g, ''); }
     catch (_) { return 'evt_' + Date.now() + '_' + Math.random().toString(16).slice(2); }
   }
-
   function setStatus(text, ok) {
     statusEl.textContent = text;
     statusEl.className = 'text-sm mt-2 ' + (ok ? 'text-emerald-100' : 'text-cyan-100');
   }
+  function roomName() { return (roomInput.value || 'main-whiteboard').trim() || 'main-whiteboard'; }
+  function round4(n) { return Math.round(n * 10000) / 10000; }
+  function clamp01(n) { return Math.max(0, Math.min(1, n)); }
 
-  function roomName() {
-    return (roomInput.value || 'main-whiteboard').trim() || 'main-whiteboard';
-  }
-
-  function backgroundKey() {
-    return 'whiteboard_background_' + roomName();
-  }
-
+  // ---------- background image (local to this browser) ----------
+  function backgroundKey() { return 'whiteboard_background_' + roomName(); }
   function saveBackground() {
     try {
-      if (imageDataUrl) localStorage.setItem(backgroundKey(), JSON.stringify({ data: imageDataUrl, scale: imageScale }));
+      if (imageDataUrl) localStorage.setItem(backgroundKey(), JSON.stringify({ data: imageDataUrl, scale: imageScale, x: imageX, y: imageY }));
       else localStorage.removeItem(backgroundKey());
     } catch (_) {}
   }
-
   function loadBackground() {
-    uploadedImage = null;
-    imageDataUrl = '';
+    uploadedImage = null; imageDataUrl = ''; imageX = 0; imageY = 0; imageScale = 1;
     try {
       const raw = localStorage.getItem(backgroundKey());
       if (!raw) return redrawAll();
-      const payload = JSON.parse(raw);
-      if (!payload || !payload.data) return redrawAll();
-      imageDataUrl = payload.data;
-      imageScale = Number(payload.scale || 1);
+      const p = JSON.parse(raw);
+      if (!p || !p.data) return redrawAll();
+      imageDataUrl = p.data;
+      imageScale = Number(p.scale || 1);
+      imageX = Number(p.x || 0); imageY = Number(p.y || 0);
       imageScaleInput.value = Math.round(imageScale * 100);
       imageScaleValue.textContent = Math.round(imageScale * 100) + '%';
       const img = new Image();
       img.onload = function () { uploadedImage = img; redrawAll(); };
       img.src = imageDataUrl;
-    } catch (_) {
-      redrawAll();
-    }
+    } catch (_) { redrawAll(); }
+  }
+  function imageRect() {
+    if (!uploadedImage) return null;
+    return { x: imageX, y: imageY, w: uploadedImage.width * imageScale, h: uploadedImage.height * imageScale };
   }
 
-  function whiteFill() {
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.restore();
-  }
-
-  function drawBackground() {
-    whiteFill();
-    if (uploadedImage) {
-      ctx.drawImage(uploadedImage, 0, 0, uploadedImage.width * imageScale, uploadedImage.height * imageScale);
-    }
-  }
-
+  // ---------- geometry helpers ----------
   function pointFromEvent(event) {
     const rect = canvas.getBoundingClientRect();
-    const touch = event.touches && event.touches[0] ? event.touches[0] : event;
-    return {
-      x: Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height))
-    };
+    const t = event.touches && event.touches[0] ? event.touches[0] : event;
+    return { x: clamp01((t.clientX - rect.left) / rect.width), y: clamp01((t.clientY - rect.top) / rect.height) };
+  }
+  function px(p) { return { x: p.x * W, y: p.y * H }; }
+
+  function textFontPx(size) { return Math.max(14, Math.min(120, Number(size || 4) * 5)); }
+
+  // Word-wrap so text always stays inside the board.
+  function wrapText(c, text, maxWidth) {
+    const out = [];
+    String(text || '').split('\n').forEach(function (para) {
+      let line = '';
+      para.split(' ').forEach(function (word) {
+        const candidate = line ? line + ' ' + word : word;
+        if (c.measureText(candidate).width <= maxWidth) { line = candidate; return; }
+        if (line) { out.push(line); line = ''; }
+        while (c.measureText(word).width > maxWidth && word.length > 1) {
+          let i = word.length - 1;
+          while (i > 1 && c.measureText(word.slice(0, i)).width > maxWidth) i--;
+          out.push(word.slice(0, i));
+          word = word.slice(i);
+        }
+        line = word;
+      });
+      out.push(line);
+    });
+    return out;
+  }
+  function textLayout(c, e) {
+    const fontPx = textFontPx(e.size);
+    c.font = fontPx + 'px sans-serif';
+    const x = e.from.x * W, y = e.from.y * H;
+    const lines = wrapText(c, e.text, Math.max(80, W - x - 12));
+    const lh = fontPx * 1.25;
+    let w = 0;
+    lines.forEach(function (l) { w = Math.max(w, c.measureText(l).width); });
+    return { x: x, y: y, lines: lines, lh: lh, w: w, h: lines.length * lh, fontPx: fontPx };
   }
 
-  function px(point) {
-    return { x: point.x * canvas.width, y: point.y * canvas.height };
-  }
-
-  function setStyle(event) {
-    ctx.lineWidth = Number(event.size || 4);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = event.color || '#0f766e';
-    ctx.fillStyle = event.color || '#0f766e';
-    ctx.globalAlpha = Number(event.alpha || 1);
-    ctx.globalCompositeOperation = event.mode === 'eraser' ? 'destination-out' : 'source-over';
-  }
-
-  function drawArrow(from, to) {
-    const headlen = Math.max(10, Number(ctx.lineWidth || 4) * 3);
-    const angle = Math.atan2(to.y - from.y, to.x - from.x);
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(to.x, to.y);
-    ctx.lineTo(to.x - headlen * Math.cos(angle - Math.PI / 6), to.y - headlen * Math.sin(angle - Math.PI / 6));
-    ctx.moveTo(to.x, to.y);
-    ctx.lineTo(to.x - headlen * Math.cos(angle + Math.PI / 6), to.y - headlen * Math.sin(angle + Math.PI / 6));
-    ctx.stroke();
-  }
-
-  function drawEvent(event) {
-    if (!event || !event.from) return;
-    const kind = event.kind || 'stroke';
-    const from = px(event.from);
-    const to = px(event.to || event.from);
-    ctx.save();
-    setStyle(event);
-    if (kind === 'stroke') {
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
-      ctx.stroke();
-    } else if (kind === 'line') {
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      ctx.lineTo(to.x, to.y);
-      ctx.stroke();
-    } else if (kind === 'rectangle') {
-      ctx.strokeRect(from.x, from.y, to.x - from.x, to.y - from.y);
-    } else if (kind === 'circle') {
-      const radius = Math.hypot(to.x - from.x, to.y - from.y);
-      ctx.beginPath();
-      ctx.arc(from.x, from.y, radius, 0, Math.PI * 2);
-      ctx.stroke();
-    } else if (kind === 'arrow') {
-      drawArrow(from, to);
-    } else if (kind === 'text') {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1;
-      ctx.font = Math.max(12, Number(event.size || 4) * 5) + 'px sans-serif';
-      ctx.fillText(event.text || '', from.x, from.y);
+  // Bounding box used for hit-testing (includes real extent of circles/text).
+  function eventBounds(e) {
+    if (e.kind === 'text') {
+      lctx.save(); const L = textLayout(lctx, e); lctx.restore();
+      return { x: L.x, y: L.y, w: L.w, h: L.h };
     }
-    ctx.restore();
+    const pts = e.points && e.points.length
+      ? e.points.map(function (p) { return { x: p[0] * W, y: p[1] * H }; })
+      : [px(e.from), px(e.to || e.from)];
+    if (e.kind === 'circle') {
+      const r = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      return { x: pts[0].x - r, y: pts[0].y - r, w: 2 * r, h: 2 * r };
+    }
+    return pointsBounds(pts, (e.size || 4) / 2);
+  }
+  function pointsBounds(pts, pad) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    pts.forEach(function (p) {
+      minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+    });
+    pad = pad || 0;
+    return { x: minX - pad, y: minY - pad, w: maxX - minX + 2 * pad, h: maxY - minY + 2 * pad };
   }
 
-  function redrawAll(extraEvent) {
-    drawBackground();
-    events.forEach(drawEvent);
-    if (extraEvent) drawEvent(extraEvent);
+  function translateEvent(e, dx, dy) {
+    const mv = function (p) { return p ? { x: clamp01(p.x + dx), y: clamp01(p.y + dy) } : p; };
+    const copy = Object.assign({}, e, { from: mv(e.from), to: mv(e.to) });
+    if (e.points) copy.points = e.points.map(function (p) { return [round4(clamp01(p[0] + dx)), round4(clamp01(p[1] + dy))]; });
+    return copy;
+  }
+  function applyMove(id, dx, dy) {
+    const i = events.findIndex(function (e) { return e.event_id === id; });
+    if (i >= 0) events[i] = translateEvent(events[i], dx, dy);
+  }
+
+  // Keep a dragged item inside the board. Returns normalized dx/dy.
+  function clampDelta(e, dxN, dyN) {
+    let dx = dxN * W, dy = dyN * H, minX, maxX, minY, maxY;
+    if (e.kind === 'text') {
+      const b = eventBounds(e);
+      minX = -b.x; maxX = W - 120 - b.x;
+      minY = -b.y; maxY = H - Math.min(b.h, 40) - b.y;
+    } else {
+      const pts = e.points && e.points.length
+        ? e.points.map(function (p) { return { x: p[0] * W, y: p[1] * H }; })
+        : [px(e.from), px(e.to || e.from)];
+      const b = pointsBounds(pts, 0);
+      minX = -b.x; maxX = W - (b.x + b.w);
+      minY = -b.y; maxY = H - (b.y + b.h);
+    }
+    if (minX > maxX) { minX = maxX = 0; }
+    if (minY > maxY) { minY = maxY = 0; }
+    dx = Math.max(minX, Math.min(maxX, dx));
+    dy = Math.max(minY, Math.min(maxY, dy));
+    return { dx: dx / W, dy: dy / H };
+  }
+
+  function hitTest(point) {
+    const x = point.x * W, y = point.y * H, pad = 8;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (!e.event_id || e.mode === 'eraser') continue;
+      if (e.kind === 'stroke' && !(e.points && e.points.length)) continue;   // legacy segments
+      if (currentParticipantId && e.participant_id && e.participant_id !== currentParticipantId) continue;
+      const b = eventBounds(e);
+      if (x >= b.x - pad && x <= b.x + b.w + pad && y >= b.y - pad && y <= b.y + b.h + pad) return e;
+    }
+    return null;
+  }
+
+  // ---------- drawing ----------
+  function setStyle(c, e) {
+    c.lineWidth = Number(e.size || 4);
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    c.strokeStyle = e.color || '#0f766e';
+    c.fillStyle = e.color || '#0f766e';
+    c.globalAlpha = Number(e.alpha || 1);
+    c.globalCompositeOperation = e.mode === 'eraser' ? 'destination-out' : 'source-over';
+  }
+  function drawArrow(c, from, to) {
+    const head = Math.max(10, Number(c.lineWidth || 4) * 3);
+    const a = Math.atan2(to.y - from.y, to.x - from.x);
+    c.beginPath(); c.moveTo(from.x, from.y); c.lineTo(to.x, to.y); c.stroke();
+    c.beginPath();
+    c.moveTo(to.x, to.y); c.lineTo(to.x - head * Math.cos(a - Math.PI / 6), to.y - head * Math.sin(a - Math.PI / 6));
+    c.moveTo(to.x, to.y); c.lineTo(to.x - head * Math.cos(a + Math.PI / 6), to.y - head * Math.sin(a + Math.PI / 6));
+    c.stroke();
+  }
+  function drawEvent(c, e) {
+    if (!e || !e.from) return;
+    const kind = e.kind || 'stroke';
+    c.save();
+    setStyle(c, e);
+    if (kind === 'text') {
+      c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+      const L = textLayout(c, e);
+      c.textBaseline = 'top';
+      L.lines.forEach(function (line, i) { c.fillText(line, L.x, L.y + i * L.lh); });
+    } else if (kind === 'stroke' && e.points && e.points.length) {
+      c.beginPath();
+      c.moveTo(e.points[0][0] * W, e.points[0][1] * H);
+      for (let i = 1; i < e.points.length; i++) c.lineTo(e.points[i][0] * W, e.points[i][1] * H);
+      if (e.points.length === 1) c.lineTo(e.points[0][0] * W, e.points[0][1] * H);
+      c.stroke();
+    } else {
+      const from = px(e.from), to = px(e.to || e.from);
+      if (kind === 'stroke' || kind === 'line') {
+        c.beginPath(); c.moveTo(from.x, from.y); c.lineTo(to.x, to.y); c.stroke();
+      } else if (kind === 'rectangle') {
+        c.strokeRect(from.x, from.y, to.x - from.x, to.y - from.y);
+      } else if (kind === 'circle') {
+        c.beginPath(); c.arc(from.x, from.y, Math.hypot(to.x - from.x, to.y - from.y), 0, Math.PI * 2); c.stroke();
+      } else if (kind === 'arrow') {
+        drawArrow(c, from, to);
+      }
+    }
+    c.restore();
+  }
+
+  function redrawAll(extra, moving) {
+    lctx.clearRect(0, 0, W, H);
+    events.forEach(function (e) {
+      drawEvent(lctx, moving && e.event_id === moving.id ? translateEvent(e, moving.dx, moving.dy) : e);
+    });
+    if (extra) drawEvent(lctx, extra);
+    ctx.save();
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    if (uploadedImage) ctx.drawImage(uploadedImage, imageX, imageY, uploadedImage.width * imageScale, uploadedImage.height * imageScale);
+    ctx.drawImage(layer, 0, 0);
+    ctx.restore();
   }
 
   function currentMode() {
-    const tool = toolSelect.value;
-    if (tool === 'eraser') return 'eraser';
-    if (tool === 'highlighter') return 'highlighter';
-    if (tool === 'text') return 'text';
-    if (['line', 'rectangle', 'circle', 'arrow'].includes(tool)) return 'shape';
-    return 'pen';
+    const t = toolSelect.value;
+    if (t === 'eraser' || t === 'highlighter' || t === 'text') return t;
+    return SHAPES.includes(t) ? 'shape' : 'pen';
   }
-
   function makeEvent(kind, from, to, text) {
     const mode = currentMode();
     return {
-      event_id: eventId(),
-      kind,
-      from,
-      to: to || from,
-      color: penColorInput.value,
-      size: Number(penWidthInput.value || 4),
-      mode,
-      alpha: mode === 'highlighter' ? 0.3 : 1,
-      text: text || ''
+      event_id: eventId(), kind: kind, from: from, to: to || from,
+      color: penColorInput.value, size: Number(penWidthInput.value || 4),
+      mode: mode, alpha: mode === 'highlighter' ? 0.3 : 1, text: text || ''
     };
   }
 
-  function applyIncomingEvent(event) {
-    if (!event) return;
-    if (event.event_id && seenEventIds.has(event.event_id)) return;
-    if (event.event_id) seenEventIds.add(event.event_id);
-    events.push(event);
+  // ---------- networking ----------
+  function applyIncomingEvent(e) {
+    if (!e) return;
+    if (e.event_id && seenEventIds.has(e.event_id)) return;
+    if (e.event_id) seenEventIds.add(e.event_id);
+    events.push(e);
     if (events.length > 1000) events = events.slice(-1000);
-    drawEvent(event);
+    redrawAll();
   }
-
-  function sendEvent(event) {
+  function sendEvent(e, keepRedo) {
     if (!canInteract) { loginForWhiteboard(); return; }
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    redoStack = [];
-    if (currentParticipantId) event.participant_id = currentParticipantId;
-    if (event.event_id) seenEventIds.add(event.event_id);
-    events.push(event);
+    if (!keepRedo) redoStack = [];
+    if (currentParticipantId) e.participant_id = currentParticipantId;
+    if (e.event_id) seenEventIds.add(e.event_id);
+    events.push(e);
     if (events.length > 1000) events = events.slice(-1000);
-    drawEvent(event);
-    ws.send(JSON.stringify({ type: 'whiteboard_event', event }));
+    redrawAll();
+    ws.send(JSON.stringify({ type: 'whiteboard_event', event: e }));
   }
 
   function updateActiveUsers(participants) {
     const users = Array.isArray(participants) ? participants : [];
     activeCount.textContent = String(users.length);
-    if (!users.length) {
-      activeUsers.innerHTML = '<span class="text-gray-400">No signed-in users connected.</span>';
-      return;
-    }
-    activeUsers.innerHTML = users.map(function (user) {
-      const name = user.display_name || user.participant_id || 'User';
-      return '<span class="rounded-full bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 px-3 py-1 font-semibold">' + esc(name) + '</span>';
+    if (!users.length) { activeUsers.innerHTML = '<span class="text-gray-400">No signed-in users connected.</span>'; return; }
+    activeUsers.innerHTML = users.map(function (u) {
+      return '<span class="rounded-full bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 px-3 py-1 font-semibold">' + esc(u.display_name || u.participant_id || 'User') + '</span>';
     }).join('');
   }
 
   function connect() {
     if (ws) ws.close();
-    events = [];
-    seenEventIds = new Set();
-    redoStack = [];
+    events = []; seenEventIds = new Set(); redoStack = [];
     redrawAll();
     loadBackground();
     const room = encodeURIComponent(roomName());
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const params = new URLSearchParams();
-    if (token) {
-      params.set('token', token);
-    } else {
-      params.set('participant_id', viewerId());
-      params.set('display_name', 'Viewer');
-    }
+    if (token) params.set('token', token);
+    else { params.set('participant_id', viewerId()); params.set('display_name', 'Viewer'); }
     ws = new WebSocket(scheme + '//' + location.host + '/api/classroom/' + room + '?' + params.toString());
     setStatus('Connecting...', false);
     ws.addEventListener('open', function () { setStatus(canInteract ? 'Connected' : 'Viewing live board', true); });
@@ -400,14 +470,15 @@
         currentParticipantId = data.participant_id || '';
       } else if (data.type === 'whiteboard_state') {
         events = Array.isArray(data.events) ? data.events : [];
-        seenEventIds = new Set(events.map(e => e && e.event_id).filter(Boolean));
+        seenEventIds = new Set(events.map(function (e) { return e && e.event_id; }).filter(Boolean));
         redrawAll();
       } else if (data.type === 'whiteboard_event') {
         applyIncomingEvent(data.event || {});
+      } else if (data.type === 'whiteboard_move') {
+        applyMove(data.event_id, Number(data.dx) || 0, Number(data.dy) || 0);
+        redrawAll();
       } else if (data.type === 'whiteboard_clear') {
-        events = [];
-        seenEventIds = new Set();
-        redoStack = [];
+        events = []; seenEventIds = new Set(); redoStack = [];
         redrawAll();
       } else if (data.type === 'room_state') {
         updateActiveUsers(data.participants || []);
@@ -415,80 +486,175 @@
     });
   }
 
+  // ---------- inline text editor ----------
+  function openTextEditor(point) {
+    const rect = canvas.getBoundingClientRect();
+    const scale = rect.width / W;
+    const fontPx = textFontPx(penWidthInput.value);
+    const xPx = Math.min(point.x * W, W - 120);
+    const yPx = Math.min(point.y * H, H - fontPx * 1.4);
+    editorPoint = { x: round4(xPx / W), y: round4(yPx / H) };
+    Object.assign(textEditor.style, {
+      left: (xPx * scale) + 'px', top: (yPx * scale) + 'px',
+      width: ((W - xPx - 12) * scale) + 'px',
+      fontSize: (fontPx * scale) + 'px', color: penColorInput.value, height: 'auto'
+    });
+    textEditor.value = '';
+    textEditor.classList.remove('hidden');
+    textEditor.focus();
+  }
+  function closeTextEditor(save) {
+    if (!editorPoint) return;
+    const p = editorPoint, text = textEditor.value.trim();
+    editorPoint = null;
+    textEditor.classList.add('hidden');
+    textEditor.value = '';
+    if (save && text) sendEvent(makeEvent('text', p, p, text.slice(0, 1000)));
+  }
+  textEditor.addEventListener('input', function () {
+    textEditor.style.height = 'auto';
+    textEditor.style.height = textEditor.scrollHeight + 'px';
+  });
+  textEditor.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') { ev.preventDefault(); closeTextEditor(false); }
+    else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); closeTextEditor(true); }
+  });
+  textEditor.addEventListener('blur', function () { closeTextEditor(true); });
+
+  // ---------- pointer handling ----------
+  function showCoords(point) {
+    coordinates.textContent = 'x: ' + Math.round(point.x * W) + ', y: ' + Math.round(point.y * H);
+  }
+
   function start(event) {
     event.preventDefault();
+    if (editorPoint) { closeTextEditor(true); return; }
     if (!canInteract) { loginForWhiteboard(); return; }
     const point = pointFromEvent(event);
-    coordinates.textContent = 'x: ' + Math.round(point.x * canvas.width) + ', y: ' + Math.round(point.y * canvas.height);
+    showCoords(point);
     const tool = toolSelect.value;
-    if (tool === 'text') {
-      const text = prompt('Enter text to add:');
-      if (text) sendEvent(makeEvent('text', point, point, text));
+
+    if (tool === 'move') {
+      const hit = hitTest(point);
+      if (hit) { drag = { type: 'event', event: hit, start: point, dx: 0, dy: 0 }; canvas.style.cursor = 'grabbing'; return; }
+      const r = imageRect();
+      if (r && point.x * W >= r.x && point.x * W <= r.x + r.w && point.y * H >= r.y && point.y * H <= r.y + r.h) {
+        drag = { type: 'image', start: point, origX: imageX, origY: imageY };
+        canvas.style.cursor = 'grabbing';
+      }
       return;
     }
+    if (tool === 'text') { openTextEditor(point); return; }
+
     drawing = true;
-    startPoint = point;
-    lastPoint = point;
-    draftEvent = null;
+    startPoint = point; lastPoint = point; draftEvent = null;
+    strokePoints = [[round4(point.x), round4(point.y)]];
   }
 
   function move(event) {
     const point = pointFromEvent(event);
-    coordinates.textContent = 'x: ' + Math.round(point.x * canvas.width) + ', y: ' + Math.round(point.y * canvas.height);
+    showCoords(point);
+
+    if (drag) {
+      event.preventDefault();
+      if (drag.type === 'image') {
+        imageX = drag.origX + (point.x - drag.start.x) * W;
+        imageY = drag.origY + (point.y - drag.start.y) * H;
+        redrawAll();
+      } else {
+        const d = clampDelta(drag.event, point.x - drag.start.x, point.y - drag.start.y);
+        drag.dx = d.dx; drag.dy = d.dy;
+        redrawAll(null, { id: drag.event.event_id, dx: d.dx, dy: d.dy });
+      }
+      return;
+    }
     if (!drawing || !lastPoint) return;
     event.preventDefault();
     const tool = toolSelect.value;
-    if (tool === 'pen' || tool === 'eraser' || tool === 'highlighter') {
-      sendEvent(makeEvent('stroke', lastPoint, point));
+    if (PEN_TOOLS.includes(tool)) {
+      if (Math.hypot((point.x - lastPoint.x) * W, (point.y - lastPoint.y) * H) < 2) return;
+      strokePoints.push([round4(point.x), round4(point.y)]);
       lastPoint = point;
+      draftEvent = makeEvent('stroke', startPoint, point);
+      draftEvent.points = strokePoints.slice();
+      redrawAll(draftEvent);
     } else {
       draftEvent = makeEvent(tool, startPoint, point);
       redrawAll(draftEvent);
     }
   }
 
-  function stop(event) {
-    if (!drawing) return;
-    drawing = false;
-    const hasPointer = event && (
-      typeof event.clientX === 'number' ||
-      (event.touches && event.touches[0]) ||
-      (event.changedTouches && event.changedTouches[0])
-    );
-    const point = hasPointer ? pointFromEvent(event.changedTouches && event.changedTouches[0] ? event.changedTouches[0] : event) : lastPoint;
-    const tool = toolSelect.value;
-    if (['line', 'rectangle', 'circle', 'arrow'].includes(tool)) {
-      redrawAll();
-      sendEvent(makeEvent(tool, startPoint, point));
-    }
-    startPoint = null;
-    lastPoint = null;
-    draftEvent = null;
+  function downsample(pts, max) {
+    if (pts.length <= max) return pts;
+    const out = [], step = (pts.length - 1) / (max - 1);
+    for (let i = 0; i < max; i++) out.push(pts[Math.round(i * step)]);
+    return out;
   }
 
+  function stop(event) {
+    if (drag) {
+      const d = drag; drag = null; syncToolButtons();
+      if (d.type === 'image') saveBackground();
+      else if ((d.dx || d.dy) && ws && ws.readyState === WebSocket.OPEN) {
+        applyMove(d.event.event_id, d.dx, d.dy);
+        ws.send(JSON.stringify({ type: 'whiteboard_move', event_id: d.event.event_id, dx: d.dx, dy: d.dy }));
+        redrawAll();
+      } else redrawAll();
+      return;
+    }
+    if (!drawing) return;
+    drawing = false;
+    const tool = toolSelect.value;
+    if (PEN_TOOLS.includes(tool)) {
+      let pts = strokePoints.length === 1 ? [strokePoints[0], strokePoints[0]] : strokePoints;
+      pts = downsample(pts, 600);
+      const first = { x: pts[0][0], y: pts[0][1] }, last = { x: pts[pts.length - 1][0], y: pts[pts.length - 1][1] };
+      const e = makeEvent('stroke', first, last);
+      e.points = pts;
+      draftEvent = null;
+      sendEvent(e);
+    } else if (SHAPES.includes(tool)) {
+      const hasPointer = event && (typeof event.clientX === 'number' || (event.changedTouches && event.changedTouches[0]));
+      const point = hasPointer
+        ? pointFromEvent(event.changedTouches && event.changedTouches[0] ? event.changedTouches[0] : event)
+        : lastPoint;
+      draftEvent = null;
+      sendEvent(makeEvent(tool, startPoint, point));
+    }
+    startPoint = null; lastPoint = null; strokePoints = [];
+  }
+
+  // ---------- actions ----------
   function clearRoom() {
     if (!canInteract) { loginForWhiteboard(); return; }
     if (!confirm('Clear this whiteboard room for everyone?')) return;
-    events = [];
-    seenEventIds = new Set();
-    redoStack = [];
+    events = []; seenEventIds = new Set(); redoStack = [];
     redrawAll();
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'whiteboard_clear' }));
   }
 
   function undo() {
     if (!canInteract) { loginForWhiteboard(); return; }
-    const idx = [...events].map((event, index) => ({ event, index })).reverse().find(item => !currentParticipantId || item.event.participant_id === currentParticipantId || !item.event.participant_id);
-    if (idx) redoStack.push(idx.event);
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'whiteboard_undo' }));
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // The server removes the last event by this participant; mirror that locally.
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (!currentParticipantId || e.participant_id === currentParticipantId) {
+        redoStack.push(e);
+        events.splice(i, 1);
+        if (e.event_id) seenEventIds.delete(e.event_id);
+        redrawAll();
+        ws.send(JSON.stringify({ type: 'whiteboard_undo' }));
+        return;
+      }
+    }
   }
 
   function redo() {
     if (!canInteract) { loginForWhiteboard(); return; }
-    const event = redoStack.pop();
-    if (!event) return;
-    const copy = Object.assign({}, event, { event_id: eventId() });
-    sendEvent(copy);
+    const e = redoStack.pop();
+    if (!e) return;
+    sendEvent(Object.assign({}, e, { event_id: eventId() }), true);   // keepRedo = true
   }
 
   function downloadCanvas() {
@@ -499,39 +665,34 @@
   }
 
   function syncToolButtons() {
-    document.querySelectorAll('.tool-button').forEach(function (button) {
-      button.setAttribute('aria-pressed', button.dataset.tool === toolSelect.value ? 'true' : 'false');
+    document.querySelectorAll('.tool-button').forEach(function (b) {
+      b.setAttribute('aria-pressed', b.dataset.tool === toolSelect.value ? 'true' : 'false');
     });
-    canvas.style.cursor = toolSelect.value === 'eraser' ? 'cell' : (toolSelect.value === 'text' ? 'text' : 'crosshair');
+    const t = toolSelect.value;
+    canvas.style.cursor = !canInteract ? 'not-allowed' : t === 'eraser' ? 'cell' : t === 'text' ? 'text' : t === 'move' ? 'grab' : 'crosshair';
   }
 
+  // ---------- wiring ----------
   if (!canInteract) {
     viewerNote.classList.remove('hidden');
-    canvas.style.cursor = 'not-allowed';
-    [toolSelect, penColorInput, penWidthInput, imageScaleInput].forEach(el => el.disabled = true);
-    ['undoBoard', 'redoBoard', 'clearBoard', 'uploadBoard', 'removeImage'].forEach(id => {
-      const button = document.getElementById(id);
-      button.classList.add('opacity-60');
-      button.title = 'Sign in to use this control';
+    [toolSelect, penColorInput, penWidthInput, imageScaleInput].forEach(function (el) { el.disabled = true; });
+    ['undoBoard', 'redoBoard', 'clearBoard', 'uploadBoard', 'removeImage'].forEach(function (id) {
+      const b = document.getElementById(id);
+      b.classList.add('opacity-60'); b.title = 'Sign in to use this control';
     });
   }
-
   loginLink.addEventListener('click', preserveWhiteboardRedirect);
   document.getElementById('connect').addEventListener('click', connect);
   roomInput.addEventListener('change', connect);
-  toolSelect.addEventListener('change', syncToolButtons);
-  document.querySelectorAll('.tool-button').forEach(function (button) {
-    button.addEventListener('click', function () {
-      toolSelect.value = button.dataset.tool;
-      syncToolButtons();
-    });
+  toolSelect.addEventListener('change', function () { closeTextEditor(true); syncToolButtons(); });
+  document.querySelectorAll('.tool-button').forEach(function (b) {
+    b.addEventListener('click', function () { toolSelect.value = b.dataset.tool; syncToolButtons(); });
   });
   penWidthInput.addEventListener('input', function () { penWidthValue.textContent = penWidthInput.value; });
   imageScaleInput.addEventListener('input', function () {
     imageScale = Number(imageScaleInput.value || 100) / 100;
     imageScaleValue.textContent = imageScaleInput.value + '%';
-    saveBackground();
-    redrawAll();
+    saveBackground(); redrawAll();
   });
   document.getElementById('uploadBoard').addEventListener('click', function () {
     if (!canInteract) { loginForWhiteboard(); return; }
@@ -541,24 +702,28 @@
     const file = event.target.files && event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = function (loadEvent) {
-      imageDataUrl = loadEvent.target.result;
+    reader.onload = function (e) {
+      imageDataUrl = e.target.result;
       const img = new Image();
       img.onload = function () {
         uploadedImage = img;
-        saveBackground();
-        redrawAll();
+        imageX = 0; imageY = 0;
+        // Fit large images inside the board by default.
+        imageScale = Math.min(1, W / img.width, H / img.height);
+        imageScaleInput.value = Math.round(imageScale * 100);
+        imageScaleValue.textContent = Math.round(imageScale * 100) + '%';
+        saveBackground(); redrawAll();
+        toolSelect.value = 'move'; syncToolButtons();   // ready to drag it
       };
       img.src = imageDataUrl;
     };
     reader.readAsDataURL(file);
+    event.target.value = '';
   });
   document.getElementById('removeImage').addEventListener('click', function () {
     if (!canInteract) { loginForWhiteboard(); return; }
-    uploadedImage = null;
-    imageDataUrl = '';
-    saveBackground();
-    redrawAll();
+    uploadedImage = null; imageDataUrl = '';
+    saveBackground(); redrawAll();
   });
   document.getElementById('downloadBoard').addEventListener('click', downloadCanvas);
   document.getElementById('clearBoard').addEventListener('click', clearRoom);
@@ -570,7 +735,7 @@
   canvas.addEventListener('touchstart', start, { passive: false });
   canvas.addEventListener('touchmove', move, { passive: false });
   canvas.addEventListener('touchend', stop, { passive: false });
-  canvas.addEventListener('mouseleave', stop);
+  canvas.addEventListener('mouseleave', function (e) { if (!drag) stop(e); });
 
   syncToolButtons();
   redrawAll();
