@@ -2466,6 +2466,73 @@ async def api_complete_activity(activity_ref: str, req, env):
     }, "Activity marked " + kind)
 
 
+async def api_delete_activity(activity_ref: str, req, env):
+    """DELETE /api/activities/:id — permanently delete an activity the caller hosts."""
+    user = verify_token(req.headers.get("Authorization"), env.JWT_SECRET)
+    if not user:
+        return err("Authentication required", 401)
+
+    try:
+        act = await env.DB.prepare(
+            "SELECT id,title,host_id FROM activities WHERE id=? OR slug=? LIMIT 1"
+        ).bind(activity_ref, activity_ref).first()
+    except Exception as exc:
+        await capture_exception(exc, req, env, "api_delete_activity.lookup")
+        return err("Could not delete activity — please try again", 500)
+
+    if not act:
+        return err("Activity not found", 404)
+    if act.host_id != user["id"]:
+        return err("Only the host can delete this activity", 403)
+
+    act_id = act.id
+    title = act.title or "An activity"
+    # Collect enrollees before their rows are deleted so they can be notified.
+    recipient_ids = await _activity_enrollee_ids(env, act_id, exclude_user_id=user["id"])
+
+    # Children first: D1 enforces foreign keys, and several of these tables have no ON DELETE CASCADE.
+    cleanup = [
+        "DELETE FROM session_attendance WHERE session_id IN (SELECT id FROM sessions WHERE activity_id=?)",
+        "DELETE FROM certificates WHERE enrollment_id IN (SELECT id FROM enrollments WHERE activity_id=?)",
+        "DELETE FROM enrollments WHERE activity_id=?",
+        "DELETE FROM activity_materials WHERE activity_id=?",
+        "DELETE FROM sessions WHERE activity_id=?",
+        "DELETE FROM activity_tags WHERE activity_id=?",
+        "DELETE FROM activity_cart_items WHERE activity_id=?",
+        "DELETE FROM activity_completions WHERE activity_id=?",
+        "DELETE FROM activity_interest WHERE activity_id=?",
+        "UPDATE message_requests SET activity_id=NULL WHERE activity_id=?",
+    ]
+    stmts = [env.DB.prepare(sql).bind(act_id) for sql in cleanup]
+    stmts.append(
+        env.DB.prepare("DELETE FROM activities WHERE id=? AND host_id=?").bind(act_id, user["id"])
+    )
+
+    async def run():
+        await env.DB.batch(stmts)  # one transaction: all of it is deleted, or none of it
+
+    try:
+        try:
+            await run()
+        except Exception as exc:
+            if not _is_no_such_table_error(exc):
+                raise
+            await init_db(env)
+            await run()
+    except Exception as exc:
+        await capture_exception(exc, req, env, "api_delete_activity")
+        return err("Could not delete activity — please try again", 500)
+
+    for uid in recipient_ids:
+        await _create_notification(
+            env, uid, "info", "Activity Deleted",
+            f"'{title}' was deleted by its host.",
+            category="enrollment",
+        )
+
+    return ok({"id": act_id}, "Activity deleted")
+
+
 async def api_express_activity_interest(activity_ref: str, req, env):
     user = verify_token(req.headers.get("Authorization") or "", env.JWT_SECRET)
     if not user:
@@ -7545,6 +7612,10 @@ async def _dispatch(request, env):
         m = re.fullmatch(r"/api/activities/([A-Za-z0-9_-]+)", path)
         if m and method == "GET":
             return await api_get_activity(m.group(1), request, env)
+
+        if m and method == "DELETE":
+            return await api_delete_activity(m.group(1), request, env)
+
 
         if path == "/api/join" and method == "POST":
             return await api_join(request, env)
