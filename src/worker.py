@@ -2713,7 +2713,7 @@ async def api_dashboard(req, env):
     enc = env.ENCRYPTION_KEY
 
     res = await env.DB.prepare(
-        "SELECT a.id,a.title,a.slug,a.type,a.format,a.schedule_type,a.created_at,"
+        "SELECT a.id,a.title,a.description,a.slug,a.type,a.format,a.schedule_type,a.created_at,"
         "(SELECT COUNT(*) FROM enrollments WHERE activity_id=a.id AND status='active')"
         " AS participant_count,"
         "(SELECT COUNT(*) FROM sessions WHERE activity_id=a.id) AS session_count"
@@ -2730,6 +2730,7 @@ async def api_dashboard(req, env):
             "id":                r.id,
             "slug":              getattr(r, "slug", "") or "",
             "title":             r.title,
+            "description":       await decrypt_aes(r.description or "", enc),
             "type":              r.type,
             "format":            r.format,
             "schedule_type":     r.schedule_type,
