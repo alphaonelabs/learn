@@ -6612,9 +6612,7 @@ class ClassroomDO(DurableObject):
                 "display_name":   display_name,
                 "can_interact":   can_interact,
             }))
-            whiteboard_events = await self.ctx.storage.get("whiteboard_events")
-            if not isinstance(whiteboard_events, list):
-                whiteboard_events = []
+            whiteboard_events = await self._load_whiteboard_events()
             server.send(json.dumps({
                 "type": "whiteboard_state",
                 "events": whiteboard_events[-1000:],
@@ -6636,7 +6634,7 @@ class ClassroomDO(DurableObject):
     async def on_webSocketMessage(self, ws, message):
         try:
             raw_message = message if isinstance(message, str) else message.decode("utf-8")
-            if len(raw_message) > 8192:
+            if len(raw_message) > 65536:
                 return
             data = json.loads(raw_message)
         except Exception as exc:
@@ -6722,22 +6720,16 @@ class ClassroomDO(DurableObject):
             event["display_name"] = info["display_name"]
             event["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             try:
-                events = await self.ctx.storage.get("whiteboard_events")
-                if not isinstance(events, list):
-                    events = []
+                events = await self._load_whiteboard_events()
                 events.append(event)
-                events = events[-1000:]
-                await self.ctx.storage.put("whiteboard_events", events)
+                await self._save_whiteboard_events(events)
             except Exception as exc:
                 await capture_exception(exc, None, self.env, "classroom.whiteboard_event.persist")
-            self._broadcast(json.dumps({
-                "type": "whiteboard_event",
-                "event": event,
-            }))
+            self._broadcast(json.dumps({"type": "whiteboard_event", "event": event}))
 
         elif msg_type == "whiteboard_clear":
             try:
-                await self.ctx.storage.put("whiteboard_events", [])
+                await self._save_whiteboard_events([])
             except Exception as exc:
                 await capture_exception(exc, None, self.env, "classroom.whiteboard_clear.persist")
             self._broadcast(json.dumps({
@@ -6748,24 +6740,53 @@ class ClassroomDO(DurableObject):
 
         elif msg_type == "whiteboard_undo":
             try:
-                events = await self.ctx.storage.get("whiteboard_events")
-                if not isinstance(events, list):
-                    events = []
+                events = await self._load_whiteboard_events()
                 for idx in range(len(events) - 1, -1, -1):
-                    event = events[idx]
-                    if isinstance(event, dict) and event.get("participant_id") == info["participant_id"]:
+                    ev = events[idx]
+                    if isinstance(ev, dict) and ev.get("participant_id") == info["participant_id"]:
                         events.pop(idx)
                         break
-                await self.ctx.storage.put("whiteboard_events", events)
+                events = await self._save_whiteboard_events(events)
                 self._broadcast(json.dumps({
                     "type": "whiteboard_state",
-                    "events": events[-1000:],
+                    "events": events,
                     "participant_id": info["participant_id"],
                     "display_name": info["display_name"],
                 }))
             except Exception as exc:
                 await capture_exception(exc, None, self.env, "classroom.whiteboard_undo")
 
+        elif msg_type == "whiteboard_move":
+            event_id = data.get("event_id")
+            if not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", event_id):
+                return
+            try:
+                dx = float(data.get("dx", 0))
+                dy = float(data.get("dy", 0))
+            except (TypeError, ValueError):
+                return
+            if not (-1.0 <= dx <= 1.0 and -1.0 <= dy <= 1.0):   # also rejects NaN
+                return
+            try:
+                events = await self._load_whiteboard_events()
+                moved = False
+                for ev in events:
+                    # Only the author can move their own item.
+                    if (isinstance(ev, dict) and ev.get("event_id") == event_id
+                            and ev.get("participant_id") == info["participant_id"]):
+                        self._translate_whiteboard_event(ev, dx, dy)
+                        moved = True
+                        break
+                if not moved:
+                    return
+                await self._save_whiteboard_events(events)
+            except Exception as exc:
+                await capture_exception(exc, None, self.env, "classroom.whiteboard_move")
+                return
+            self._broadcast(json.dumps({
+                "type": "whiteboard_move", "event_id": event_id, "dx": dx, "dy": dy,
+                "participant_id": info["participant_id"],
+            }), exclude_session_id=sid)
 
         elif msg_type == "update_seat":
             # Classroom layout, keep in sync with DESK_ROWS/DESK_COLS in classroom_poc.html
@@ -6898,8 +6919,6 @@ class ClassroomDO(DurableObject):
         kind = value.get("kind") or value.get("tool") or "stroke"
         if kind not in {"stroke", "line", "rectangle", "circle", "arrow", "text"}:
             kind = "stroke"
-        if kind != "text" and not end:
-            return None
         color = value.get("color", "#0f766e")
         if not isinstance(color, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
             color = "#0f766e"
@@ -6920,7 +6939,21 @@ class ClassroomDO(DurableObject):
         event_id = value.get("event_id", "")
         if not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", event_id):
             event_id = str(uuid.uuid4())
-        return {
+
+        points = None
+        raw_points = value.get("points")
+        if kind == "stroke" and isinstance(raw_points, list):
+            points = []
+            for p in raw_points[:800]:
+                if isinstance(p, (list, tuple)) and len(p) >= 2:
+                    try:
+                        x, y = float(p[0]), float(p[1])
+                    except (TypeError, ValueError):
+                        continue
+                    points.append([round(max(0.0, min(1.0, x)), 4), round(max(0.0, min(1.0, y)), 4)])
+            points = points or None
+
+        result = {
             "event_id": event_id,
             "kind": kind,
             "from": start,
@@ -6929,8 +6962,11 @@ class ClassroomDO(DurableObject):
             "size": max(1, min(32, size)),
             "mode": mode,
             "alpha": max(0.05, min(1.0, alpha)),
-            "text": text[:240],
+            "text": text[:1000],
         }
+        if points:
+            result["points"] = points
+        return result
 
     def _broadcast(self, msg, exclude_session_id=None):
         for sid, info in self.sessions.items():
@@ -6982,6 +7018,42 @@ class ClassroomDO(DurableObject):
             }))
         except Exception as exc:
             print(f"[ClassroomDO._persist_attachment] sid={session_id} pid={info.get('participant_id')} error={exc!r}")
+
+    async def _load_whiteboard_events(self):
+        raw = await self.ctx.storage.get("whiteboard_events")
+        if raw is None:
+            return []
+        if hasattr(raw, "to_py"):
+            raw = raw.to_py()
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                return []
+        return raw if isinstance(raw, list) else []
+
+    async def _save_whiteboard_events(self, events):
+        events = events[-1000:]
+        payload = json.dumps(events)
+        while len(payload) > 120_000 and len(events) > 1:
+            events = events[max(1, len(events) // 10):]
+            payload = json.dumps(events)
+        await self.ctx.storage.put("whiteboard_events", payload)
+        return events
+
+    @staticmethod
+    def _clamp01_static(v):
+        return max(0.0, min(1.0, v))
+
+    def _translate_whiteboard_event(self, ev, dx, dy):
+        c = self._clamp01_static
+        for key in ("from", "to"):
+            p = ev.get(key)
+            if isinstance(p, dict):
+                ev[key] = {"x": c(float(p.get("x", 0)) + dx), "y": c(float(p.get("y", 0)) + dy)}
+        pts = ev.get("points")
+        if isinstance(pts, list):
+            ev["points"] = [[round(c(p[0] + dx), 4), round(c(p[1] + dy), 4)] for p in pts]
 
 
 class PresenceDO(DurableObject):
