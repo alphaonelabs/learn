@@ -93,9 +93,14 @@ We follow these standards in this repository:
 
 ### Testing
 
-There is no mandatory automated test suite in this repo yet, so contributors should perform manual validation before opening a PR.
+Automated unit tests run in CI on pull requests and pushes to `main`. You can run them locally:
 
-Recommended checks:
+```bash
+pip install pytest pytest-asyncio
+pytest tests/ -v
+```
+
+Contributors should also perform manual validation before opening a PR:
 
 1. Run backend locally:
 
