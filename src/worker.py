@@ -334,33 +334,133 @@ def blind_index(value: str, secret: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Password hashing
+# Password hashing & runtime pepper injection
 # ---------------------------------------------------------------------------
 
-# ⚠️  For production, derive the pepper from a secret stored via
-#     `wrangler secret put PEPPER` and pass it to _user_salt() at runtime.
-#     Rotating the pepper requires re-hashing all stored passwords.
-_PEPPER    = b"edu-platform-cf-pepper-2024"
+_DEFAULT_PEPPER: bytes = b"edu-platform-cf-pepper-2024"
+_ACTIVE_PEPPER: Optional[bytes] = None
+_PEPPER: bytes = _DEFAULT_PEPPER
 _PBKDF2_IT = 100_000
 
 
-def _user_salt(username: str) -> bytes:
+def _extract_pepper_bytes(val: Any) -> Optional[bytes]:
+    if val is None:
+        return None
+    # Prevent MagicMock / Mock objects from leaking in as strings in tests
+    if type(val).__name__ in ("MagicMock", "Mock", "AsyncMock"):
+        return None
+    if isinstance(val, (bytes, bytearray)):
+        return bytes(val) if val else None
+    if isinstance(val, str):
+        s = val.strip()
+        return s.encode("utf-8") if s else None
+    return None
+
+
+def get_pepper(env: Optional[Any] = None) -> bytes:
+    """
+    Resolve the runtime password pepper with fail-closed security in production.
+
+    Resolution order:
+      1. Explicit PASSWORD_PEPPER or PEPPER attribute on `env` binding
+      2. Cached _ACTIVE_PEPPER initialized during worker startup / on_fetch()
+      3. os.environ["PASSWORD_PEPPER"] or os.environ["PEPPER"]
+      4. If running in production (ENVIRONMENT / SENTRY_ENVIRONMENT == 'production'),
+         fail closed and raise RuntimeError.
+      5. Fallback to _DEFAULT_PEPPER for development and testing.
+    """
+    global _ACTIVE_PEPPER
+    raw = None
+
+    if env is not None:
+        raw = _extract_pepper_bytes(getattr(env, "PASSWORD_PEPPER", None))
+        if not raw:
+            raw = _extract_pepper_bytes(getattr(env, "PEPPER", None))
+
+    if not raw and _ACTIVE_PEPPER is not None:
+        return _ACTIVE_PEPPER
+
+    if not raw:
+        raw = _extract_pepper_bytes(os.environ.get("PASSWORD_PEPPER"))
+        if not raw:
+            raw = _extract_pepper_bytes(os.environ.get("PEPPER"))
+
+    if raw:
+        return raw
+
+    # Verify if running in production mode. Fail closed if pepper is missing.
+    env_str = ""
+    if env is not None:
+        env_str = str(
+            getattr(env, "ENVIRONMENT", "")
+            or getattr(env, "SENTRY_ENVIRONMENT", "")
+            or ""
+        ).strip().lower()
+    if not env_str:
+        env_str = str(
+            os.environ.get("ENVIRONMENT", "")
+            or os.environ.get("SENTRY_ENVIRONMENT", "")
+            or ""
+        ).strip().lower()
+
+    if env_str == "production":
+        raise RuntimeError(
+            "Missing required environment secret: PASSWORD_PEPPER (or PEPPER). "
+            "Set this secret via `wrangler secret put PASSWORD_PEPPER`."
+        )
+
+    return _DEFAULT_PEPPER
+
+
+def init_pepper(env: Any) -> bytes:
+    """Cache the password pepper from the worker environment."""
+    global _ACTIVE_PEPPER, _PEPPER
+    pepper = get_pepper(env)
+    _ACTIVE_PEPPER = pepper
+    _PEPPER = pepper
+    return pepper
+
+
+def reset_pepper() -> None:
+    """Reset cached active pepper (primarily for test isolation)."""
+    global _ACTIVE_PEPPER, _PEPPER
+    _ACTIVE_PEPPER = None
+    _PEPPER = _DEFAULT_PEPPER
+
+
+def _user_salt(
+    username: str,
+    pepper: Optional[bytes] = None,
+    env: Optional[Any] = None,
+) -> bytes:
     """Per-user PBKDF2 salt = SHA-256(pepper || username)."""
-    return hashlib.sha256(_PEPPER + username.encode("utf-8")).digest()
+    p = pepper if pepper is not None else get_pepper(env)
+    return hashlib.sha256(p + username.encode("utf-8")).digest()
 
 
-def hash_password(password: str, username: str) -> str:
-    """PBKDF2-SHA256 with per-user derived salt."""
-    dk = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), _user_salt(username), _PBKDF2_IT
-    )
+def hash_password(
+    password: str,
+    username: str,
+    pepper: Optional[bytes] = None,
+    env: Optional[Any] = None,
+) -> str:
+    """PBKDF2-SHA256 with per-user derived salt and injected pepper."""
+    salt = _user_salt(username, pepper=pepper, env=env)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_IT)
     return base64.b64encode(dk).decode("ascii")
 
 
-def verify_password(password: str, stored: str, username: str) -> bool:
+def verify_password(
+    password: str,
+    stored: str,
+    username: str,
+    pepper: Optional[bytes] = None,
+    env: Optional[Any] = None,
+) -> bool:
+    """Verify password against stored PBKDF2 or legacy Django hash."""
     if _verify_django_password(password, stored):
         return True
-    return hash_password(password, username) == stored
+    return hash_password(password, username, pepper=pepper, env=env) == stored
 
 
 def _verify_django_password(password: str, stored: str) -> bool:
@@ -1473,7 +1573,7 @@ async def seed_db(env, enc_key: str):
                 await encrypt_aes(display,  enc_key),
                 await encrypt_aes(uname,    enc_key),
                 await encrypt_aes(email,    enc_key),
-                hash_password(pw, uname),
+                hash_password(pw, uname, env=env),
                 await encrypt_aes(role,     enc_key),
                 1,
             ).run()
@@ -1705,7 +1805,7 @@ async def api_register(req, env):
             await encrypt_aes(name,     enc),
             await encrypt_aes(username, enc),
             await encrypt_aes(email,    enc),
-            hash_password(password, username),
+            hash_password(password, username, env=env),
             await encrypt_aes(role, enc),
             0,
         ).run()
@@ -1793,7 +1893,7 @@ async def api_login(req, env):
     if not stored_username or stored_username == "[decryption error]":
         return err("Invalid username or password", 401)
 
-    if not verify_password(password, password_hash, stored_username):
+    if not verify_password(password, password_hash, stored_username, env=env):
         return err("Invalid username or password", 401)
 
     if not row.email_verified:
@@ -2054,7 +2154,7 @@ async def api_reset_password(req, env):
     if password_error:
         return err(password_error)
 
-    new_hash = hash_password(new_password, username)
+    new_hash = hash_password(new_password, username, env=env)
 
     try:
         await env.DB.prepare(
@@ -3315,7 +3415,7 @@ async def api_change_password(req, env):
             or not email or email == "[decryption error]"):
         return err("Could not change password — please try again", 500)
 
-    if not verify_password(current_password, row.password_hash, username):
+    if not verify_password(current_password, row.password_hash, username, env=env):
         return err("Current password is incorrect", 400)
 
     # Per-account cooldown so the inbox can't be flooded with confirmation emails.
@@ -3348,7 +3448,7 @@ async def api_change_password(req, env):
             " (id,user_id,token_hash,new_password_hash,expires_at) VALUES (?,?,?,?,?)"
         ).bind(
             new_id(), user["id"], token_hash,
-            hash_password(new_password, username), expires_at,
+            hash_password(new_password, username, env=env), expires_at,
         ).run()
     except Exception as exc:
         await capture_exception(exc, req, env, "api_change_password.store_request")
@@ -5273,7 +5373,7 @@ async def _legacy_ensure_user_exists(env, enc: str, user_id: str, label: str = "
         await encrypt_aes(label, enc),
         await encrypt_aes(username, enc),
         await encrypt_aes(email, enc),
-        hash_password(str(uuid.uuid4()), username),
+        hash_password(str(uuid.uuid4()), username, env=env),
         await encrypt_aes("host", enc),
         1,
     ).run()
@@ -8334,6 +8434,7 @@ async def api_submit_feedback(request, env):
 async def on_fetch(request, env):
     try:
         init_sentry(env)
+        init_pepper(env)
         return await _dispatch(request, env)
     except Exception as e:
         await capture_exception(e, request, env, "on_fetch_unhandled")
