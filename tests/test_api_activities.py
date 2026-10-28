@@ -8,7 +8,9 @@ Tests for activities API handlers:
 import base64
 import json
 import pytest
-from tests.helpers import load_worker, MockRequest, MockRow, MockDB, make_env, make_stmt, json_request
+from tests.helpers import (
+    load_worker, MockRequest, MockRow, MockDB, make_env, make_stmt, json_request, make_init_db_stmts
+)
 
 worker = load_worker()
 
@@ -169,9 +171,7 @@ class TestApiListActivities:
 
         env = make_env(db=MockDB(
             [failing_stmt]                           # first list query fails
-            + [make_stmt() for _ in range(ddl_count)]  # init_db DDL statements
-            + [make_stmt(), make_stmt()]             # init_db: email_verified ALTER + UPDATE
-            + [make_stmt() for _ in range(8)]        # init_db: profile-fields ALTERs (0004)
+            + await make_init_db_stmts(worker)       # init_db DDL + migration statements
             + [
                 make_stmt(all_results=[row]),        # retried list query succeeds
                 make_stmt(all_results=[]),           # tags query
@@ -273,9 +273,10 @@ class TestApiCreateActivity:
 
     async def test_db_error_returns_500(self):
         token = _make_host_token()
-        stmt = make_stmt()
-        stmt.bind.return_value.run.side_effect = Exception("DB error")
-        env = make_env(db=MockDB([stmt]))
+        slug_stmt = make_stmt(first=None)
+        insert_stmt = make_stmt()
+        insert_stmt.bind.return_value.run.side_effect = Exception("DB error")
+        env = make_env(db=MockDB([slug_stmt, insert_stmt]))
         r = await worker.api_create_activity(
             self._req({"title": "Course"}, token), env
         )
