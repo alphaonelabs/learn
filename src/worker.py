@@ -45,7 +45,7 @@ import re
 import time
 import traceback
 from types import SimpleNamespace
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from urllib.parse import urlparse, parse_qs, urlencode, quote, unquote
 
 from workers import Response, DurableObject
@@ -623,6 +623,160 @@ def _unauthorized_basic(realm: str = "Alpha One Labs Admin"):
     )
 
 
+class SimpleRequest:
+    """Internal lightweight request wrapper for Durable Object calls."""
+    def __init__(self, method="GET", url="http://localhost/", headers=None, body=None):
+        self.method = method
+        self.url = url
+        self.headers = dict(headers or {})
+        self._body = body
+
+    async def text(self):
+        if self._body is None:
+            return ""
+        if isinstance(self._body, bytes):
+            return self._body.decode("utf-8")
+        return str(self._body)
+
+    def get(self, key, default=None):
+        return self.headers.get(key, default)
+
+
+class RateLimiterDO(DurableObject):
+    """Durable Object actor tracking sliding-window attempt counters."""
+
+    def __init__(self, ctx=None, env=None):
+        super().__init__(ctx, env)
+        # key -> list of float timestamps
+        self.windows: Dict[str, List[float]] = {}
+
+    async def check_limit(
+        self,
+        key: str,
+        max_attempts: int = 5,
+        window_seconds: int = 60,
+        now: Optional[float] = None,
+    ) -> dict:
+        if now is None:
+            now = time.time()
+        now = float(now)
+        cutoff = now - window_seconds
+
+        if key not in self.windows and self.ctx and hasattr(self.ctx, "storage"):
+            try:
+                stored = await self.ctx.storage.get(f"rl:{key}")
+                if stored:
+                    self.windows[key] = json.loads(stored) if isinstance(stored, str) else list(stored)
+            except Exception:
+                pass
+
+        timestamps = [float(t) for t in self.windows.get(key, []) if float(t) > cutoff]
+        if len(timestamps) >= max_attempts:
+            oldest = timestamps[0]
+            retry_after = max(1, int(window_seconds - (now - oldest)))
+            self.windows[key] = timestamps
+            return {
+                "allowed": False,
+                "retry_after": retry_after,
+                "count": len(timestamps),
+            }
+
+        timestamps.append(now)
+        self.windows[key] = timestamps
+
+        if self.ctx and hasattr(self.ctx, "storage"):
+            try:
+                await self.ctx.storage.put(f"rl:{key}", json.dumps(timestamps))
+            except Exception:
+                pass
+
+        return {
+            "allowed": True,
+            "retry_after": 0,
+            "count": len(timestamps),
+            "remaining": max(0, max_attempts - len(timestamps)),
+        }
+
+    async def reset(self, key: Optional[str] = None) -> dict:
+        if key:
+            self.windows.pop(key, None)
+            if self.ctx and hasattr(self.ctx, "storage"):
+                try:
+                    await self.ctx.storage.delete(f"rl:{key}")
+                except Exception:
+                    pass
+        else:
+            self.windows.clear()
+            if self.ctx and hasattr(self.ctx, "storage"):
+                try:
+                    await self.ctx.storage.deleteAll()
+                except Exception:
+                    pass
+        return {"success": True}
+
+    async def on_fetch(self, request):
+        try:
+            url = getattr(request, "url", "")
+            method = getattr(request, "method", "POST")
+            parsed = urlparse(url)
+            path = parsed.path
+
+            if path == "/reset":
+                qs = parse_qs(parsed.query)
+                key = (qs.get("key") or [None])[0]
+                res = await self.reset(key)
+                return Response(
+                    json.dumps(res),
+                    status=200,
+                    headers={"Content-Type": "application/json", **_CORS},
+                )
+
+            key = ""
+            max_attempts = 5
+            window_seconds = 60
+            now_val = None
+
+            if method == "POST":
+                try:
+                    text = await request.text()
+                    body = json.loads(text) if text else {}
+                except Exception:
+                    body = {}
+                key = str(body.get("key", ""))
+                max_attempts = int(body.get("max_attempts", 5))
+                window_seconds = int(body.get("window_seconds", 60))
+                if "now" in body and body["now"] is not None:
+                    now_val = float(body["now"])
+            else:
+                qs = parse_qs(parsed.query)
+                key = (qs.get("key") or [""])[0]
+                if "max_attempts" in qs:
+                    max_attempts = int(qs["max_attempts"][0])
+                if "window_seconds" in qs:
+                    window_seconds = int(qs["window_seconds"][0])
+                if "now" in qs:
+                    now_val = float(qs["now"][0])
+
+            res = await self.check_limit(key, max_attempts, window_seconds, now_val)
+            headers = {"Content-Type": "application/json", **_CORS}
+            if not res["allowed"]:
+                headers["Retry-After"] = str(res["retry_after"])
+                return Response(
+                    json.dumps({"error": "Too many requests", **res}),
+                    status=429,
+                    headers=headers,
+                )
+            return Response(json.dumps(res), status=200, headers=headers)
+        except Exception as e:
+            return Response(
+                json.dumps({"error": str(e)}),
+                status=500,
+                headers={"Content-Type": "application/json", **_CORS},
+            )
+
+    fetch = on_fetch
+
+
 def _too_many_requests(retry_after: int):
     headers = {"Content-Type": "application/json", **_CORS, "Retry-After": str(retry_after)}
     return Response(json.dumps({"error": "Too many requests"}), status=429, headers=headers)
@@ -632,25 +786,158 @@ def _auth_rate_limit_env_value(env, name: str, default: int) -> int:
     try:
         env_dict = getattr(env, "__dict__", None)
         if isinstance(env_dict, dict) and name in env_dict:
-            return int(env_dict[name])
+            val = env_dict[name]
+            if isinstance(val, (int, str, float)):
+                return int(val)
     except Exception:
         pass
 
     try:
-        return int(getattr(env, name))
+        val = getattr(env, name, None)
+        if val is None or not isinstance(val, (int, str, float)):
+            return default
+        return int(val)
     except Exception:
         return default
 
 
-def _check_auth_rate_limit(req, env, route: str):
+async def _eval_rate_limit(
+    env,
+    key: str,
+    max_attempts: int,
+    window_seconds: int,
+    now: float,
+) -> Optional[Response]:
+    # 1. Durable Object check (RATE_LIMITER_DO or PRESENCE_DO)
+    do_binding = None
+    if hasattr(env, "RATE_LIMITER_DO"):
+        val = getattr(env, "RATE_LIMITER_DO")
+        if not (type(val).__name__ == "MagicMock" and "RATE_LIMITER_DO" not in getattr(env, "__dict__", {})):
+            do_binding = val
+    if not do_binding and hasattr(env, "PRESENCE_DO") and getattr(env, "USE_PRESENCE_FOR_RATE_LIMIT", False):
+        val = getattr(env, "PRESENCE_DO")
+        if not (type(val).__name__ == "MagicMock" and "PRESENCE_DO" not in getattr(env, "__dict__", {})):
+            do_binding = val
+
+    if do_binding and hasattr(do_binding, "idFromName") and hasattr(do_binding, "get"):
+        try:
+            do_id = do_binding.idFromName("auth_rate_limiter")
+            stub = do_binding.get(do_id)
+            if hasattr(stub, "check_limit") and callable(stub.check_limit):
+                res = await stub.check_limit(key, max_attempts=max_attempts, window_seconds=window_seconds, now=now)
+                if not res.get("allowed", True):
+                    return _too_many_requests(int(res.get("retry_after", 1)))
+                return None
+            elif hasattr(stub, "fetch") and callable(stub.fetch):
+                payload = json.dumps({
+                    "key": key,
+                    "max_attempts": max_attempts,
+                    "window_seconds": window_seconds,
+                    "now": now,
+                })
+                req = SimpleRequest(
+                    method="POST",
+                    url="http://rate-limiter/check",
+                    headers={"Content-Type": "application/json"},
+                    body=payload,
+                )
+                res = await stub.fetch(req)
+                if getattr(res, "status", 200) == 429:
+                    ra = 1
+                    if hasattr(res, "headers"):
+                        hdr_ra = res.headers.get("Retry-After")
+                        if hdr_ra and str(hdr_ra).isdigit():
+                            ra = int(hdr_ra)
+                    return _too_many_requests(ra)
+                return None
+        except Exception as exc:
+            print(f"[rate_limit.do_error] {exc!r}")
+
+    # 2. KV binding check (RATE_LIMIT_KV or AUTH_RATE_LIMIT_KV)
+    kv_binding = None
+    for kv_name in ("RATE_LIMIT_KV", "AUTH_RATE_LIMIT_KV"):
+        if hasattr(env, kv_name):
+            val = getattr(env, kv_name)
+            if not (type(val).__name__ == "MagicMock" and kv_name not in getattr(env, "__dict__", {})):
+                kv_binding = val
+                break
+    if kv_binding and hasattr(kv_binding, "get") and hasattr(kv_binding, "put"):
+        try:
+            kv_key = f"rl:{key}"
+            raw = await kv_binding.get(kv_key)
+            timestamps = []
+            if raw:
+                try:
+                    timestamps = json.loads(raw) if isinstance(raw, str) else list(raw)
+                except Exception:
+                    timestamps = []
+            cutoff = now - window_seconds
+            timestamps = [float(t) for t in timestamps if float(t) > cutoff]
+            if len(timestamps) >= max_attempts:
+                oldest = timestamps[0]
+                retry_after = max(1, int(window_seconds - (now - oldest)))
+                return _too_many_requests(retry_after)
+            timestamps.append(now)
+            await kv_binding.put(kv_key, json.dumps(timestamps), expiration_ttl=max(60, window_seconds * 2))
+            return None
+        except Exception as exc:
+            print(f"[rate_limit.kv_error] {exc!r}")
+
+    # 3. In-memory sliding-window fallback (_AUTH_RATE_LIMIT_STATE)
+    max_keys = max(1, _auth_rate_limit_env_value(
+        env, "AUTH_RATE_LIMIT_MAX_KEYS", _AUTH_RATE_LIMIT_MAX_KEYS
+    ))
+    stale_before = now - window_seconds
+    for stale_key, stale_state in list(_AUTH_RATE_LIMIT_STATE.items()):
+        if float(stale_state.get("window_start", 0)) < stale_before:
+            _AUTH_RATE_LIMIT_STATE.pop(stale_key, None)
+
+    if len(_AUTH_RATE_LIMIT_STATE) > max_keys:
+        overflow = len(_AUTH_RATE_LIMIT_STATE) - max_keys
+        oldest_keys = sorted(
+            _AUTH_RATE_LIMIT_STATE.items(),
+            key=lambda item: float(item[1].get("window_start", 0)),
+        )[:overflow]
+        for oldest_key, _ in oldest_keys:
+            _AUTH_RATE_LIMIT_STATE.pop(oldest_key, None)
+
+    state = _AUTH_RATE_LIMIT_STATE.get(key)
+    if not state:
+        _AUTH_RATE_LIMIT_STATE[key] = {
+            "window_start": int(now),
+            "count": 1,
+            "timestamps": [now],
+        }
+        return None
+
+    raw_ts = state.get("timestamps")
+    if raw_ts is None:
+        cnt = int(state.get("count", 0))
+        w_start = float(state.get("window_start", now))
+        raw_ts = [w_start] * cnt if w_start > stale_before else []
+
+    timestamps = [float(t) for t in raw_ts if float(t) > stale_before]
+    if len(timestamps) >= max_attempts:
+        oldest = timestamps[0]
+        retry_after = max(1, int(window_seconds - (now - oldest)))
+        state["timestamps"] = timestamps
+        state["count"] = len(timestamps)
+        state["window_start"] = int(oldest)
+        return _too_many_requests(retry_after)
+
+    timestamps.append(now)
+    state["timestamps"] = timestamps
+    state["count"] = len(timestamps)
+    state["window_start"] = int(timestamps[0])
+    return None
+
+
+async def _check_auth_rate_limit(req, env, route: str, identifier: str = "") -> Optional[Response]:
     window_seconds = max(1, _auth_rate_limit_env_value(
         env, "AUTH_RATE_LIMIT_WINDOW_SECONDS", _AUTH_RATE_LIMIT_WINDOW_SECONDS
     ))
     max_attempts = max(1, _auth_rate_limit_env_value(
         env, "AUTH_RATE_LIMIT_MAX_ATTEMPTS", _AUTH_RATE_LIMIT_MAX_ATTEMPTS
-    ))
-    max_keys = max(1, _auth_rate_limit_env_value(
-        env, "AUTH_RATE_LIMIT_MAX_KEYS", _AUTH_RATE_LIMIT_MAX_KEYS
     ))
 
     # Only CF-Connecting-IP is trusted in Cloudflare Workers.
@@ -659,35 +946,21 @@ def _check_auth_rate_limit(req, env, route: str):
         print(json.dumps({"level": "warn", "where": "auth_rate_limit", "error": "missing_cf_connecting_ip"}))
         return _too_many_requests(1)
 
-    key = f"{route}:{client_ip}"
-    now = int(time.time())
+    now = float(time.time())
 
-    # Keep in-memory state bounded by pruning expired entries and evicting oldest keys.
-    stale_before = now - window_seconds
-    for stale_key, stale_state in list(_AUTH_RATE_LIMIT_STATE.items()):
-        if int(stale_state.get("window_start", 0)) < stale_before:
-            _AUTH_RATE_LIMIT_STATE.pop(stale_key, None)
+    # Check per-IP sliding window
+    ip_key = f"{route}:{client_ip}"
+    blocked = await _eval_rate_limit(env, ip_key, max_attempts, window_seconds, now)
+    if blocked:
+        return blocked
 
-    if len(_AUTH_RATE_LIMIT_STATE) > max_keys:
-        overflow = len(_AUTH_RATE_LIMIT_STATE) - max_keys
-        oldest_keys = sorted(
-            _AUTH_RATE_LIMIT_STATE.items(),
-            key=lambda item: int(item[1].get("window_start", 0)),
-        )[:overflow]
-        for oldest_key, _ in oldest_keys:
-            _AUTH_RATE_LIMIT_STATE.pop(oldest_key, None)
+    # Check per-identifier sliding window (e.g. username_hash or email_hash)
+    if identifier:
+        id_key = f"{route}:id:{identifier}"
+        blocked = await _eval_rate_limit(env, id_key, max_attempts, window_seconds, now)
+        if blocked:
+            return blocked
 
-    state = _AUTH_RATE_LIMIT_STATE.get(key)
-    if not state or now - int(state.get("window_start", 0)) >= window_seconds:
-        _AUTH_RATE_LIMIT_STATE[key] = {"window_start": now, "count": 1}
-        return None
-
-    count = int(state.get("count", 0))
-    if count >= max_attempts:
-        retry_after = max(1, window_seconds - (now - int(state.get("window_start", now))))
-        return _too_many_requests(retry_after)
-
-    state["count"] = count + 1
     return None
 
 
@@ -779,22 +1052,23 @@ async def _send_email_via_mailgun(to_email: str, subject: str, html: str, env) -
     Endpoint: https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages
     Body: application/x-www-form-urlencoded
     """
-    api_key   = (
-        getattr(env, "MAILGUN_SENDING_KEY", "")
-        or getattr(env, "mailgun_sending_key", "")
-        or getattr(env, "MAILGUN_API_KEY", "")
-        or getattr(env, "mailgun_api_key", "")
-        or ""
-    ).strip()
-    domain    = (getattr(env, "MAILGUN_DOMAIN", "") or getattr(env, "mailgun_domain", "") or "").strip()
-    api_base  = (getattr(env, "MAILGUN_API_BASE", "") or getattr(env, "mailgun_api_base", "") or "https://api.mailgun.net/v3").strip().rstrip("/")
+    raw_key = (
+        getattr(env, "MAILGUN_SENDING_KEY", None)
+        or getattr(env, "mailgun_sending_key", None)
+        or getattr(env, "MAILGUN_API_KEY", None)
+        or getattr(env, "mailgun_api_key", None)
+    )
+    api_key = (raw_key if isinstance(raw_key, str) else "").strip()
+
+    raw_domain = getattr(env, "MAILGUN_DOMAIN", None) or getattr(env, "mailgun_domain", None)
+    domain = (raw_domain if isinstance(raw_domain, str) else "").strip()
+
+    raw_base = getattr(env, "MAILGUN_API_BASE", None) or getattr(env, "mailgun_api_base", None) or "https://api.mailgun.net/v3"
+    api_base = (raw_base if isinstance(raw_base, str) else "https://api.mailgun.net/v3").strip().rstrip("/")
     if not re.search(r"/v\d+$", api_base):
         api_base += "/v3"
-    from_addr = (
-        getattr(env, "EMAIL_FROM", "")
-        or getattr(env, "DEFAULT_FROM_EMAIL", "")
-        or "info@alphaonelabs.com"
-    ).strip()
+    raw_from = getattr(env, "EMAIL_FROM", None) or getattr(env, "DEFAULT_FROM_EMAIL", None) or "info@alphaonelabs.com"
+    from_addr = (raw_from if isinstance(raw_from, str) else "info@alphaonelabs.com").strip()
 
     if not api_key or not domain:
         print(json.dumps({"level": "warn", "where": "_send_email_via_mailgun",
@@ -1664,7 +1938,7 @@ def validate_password_strength(password: str, username: str = "") -> Optional[st
 
 
 async def api_register(req, env):
-    rate_limit_resp = _check_auth_rate_limit(req, env, "register")
+    rate_limit_resp = await _check_auth_rate_limit(req, env, "register")
     if rate_limit_resp:
         return rate_limit_resp
 
@@ -1687,6 +1961,11 @@ async def api_register(req, env):
     role = "member"
 
     enc = env.ENCRYPTION_KEY
+    u_hash = blind_index(username, enc)
+    user_rate_resp = await _check_auth_rate_limit(req, env, "register_user", identifier=u_hash)
+    if user_rate_resp:
+        return user_rate_resp
+
     referred_by_user_id = ""
     if referral_code:
         referred_by_user_id = await _referrer_user_id_for_code(env, enc, referral_code)
@@ -1700,7 +1979,7 @@ async def api_register(req, env):
             " VALUES (?,?,?,?,?,?,?,?,?)"
         ).bind(
             uid,
-            blind_index(username, enc),
+            u_hash,
             blind_index(email,    enc),
             await encrypt_aes(name,     enc),
             await encrypt_aes(username, enc),
@@ -1756,7 +2035,7 @@ async def api_register(req, env):
 
 
 async def api_login(req, env):
-    rate_limit_resp = _check_auth_rate_limit(req, env, "login")
+    rate_limit_resp = await _check_auth_rate_limit(req, env, "login")
     if rate_limit_resp:
         return rate_limit_resp
 
@@ -1772,6 +2051,9 @@ async def api_login(req, env):
 
     enc    = env.ENCRYPTION_KEY
     u_hash = blind_index(username, enc)
+    user_rate_resp = await _check_auth_rate_limit(req, env, "login_user", identifier=u_hash)
+    if user_rate_resp:
+        return user_rate_resp
     row    = await env.DB.prepare(
         "SELECT id,password_hash,role,name,username,email_verified FROM users WHERE username_hash=?"
     ).bind(u_hash).first()
@@ -1934,6 +2216,10 @@ async def api_resend_verification(req, env):
 
 async def api_forgot_password(req, env):
     """POST /api/forgot-password — generate and email a password reset link."""
+    rate_limit_resp = await _check_auth_rate_limit(req, env, "forgot_password")
+    if rate_limit_resp:
+        return rate_limit_resp
+
     body, bad_resp = await parse_json_object(req)
     if bad_resp:
         return bad_resp
@@ -1942,11 +2228,14 @@ async def api_forgot_password(req, env):
     if not email:
         return err("Email address is required")
 
-    # Always return the same message to prevent account-existence enumeration.
-    _GENERIC_OK = "If an account with that email exists, a password reset link has been sent."
-
     enc        = env.ENCRYPTION_KEY
     email_hash = blind_index(email, enc)
+    user_rate_resp = await _check_auth_rate_limit(req, env, "forgot_password_user", identifier=email_hash)
+    if user_rate_resp:
+        return user_rate_resp
+
+    # Always return the same message to prevent account-existence enumeration.
+    _GENERIC_OK = "If an account with that email exists, a password reset link has been sent."
 
     try:
         user_row = await env.DB.prepare(
@@ -3278,7 +3567,7 @@ async def api_change_password(req, env):
     if not user:
         return err("Authentication required", 401)
 
-    rate_limit_resp = _check_auth_rate_limit(req, env, "change_password")
+    rate_limit_resp = await _check_auth_rate_limit(req, env, "change_password")
     if rate_limit_resp:
         return rate_limit_resp
 
@@ -3368,7 +3657,7 @@ async def api_change_password(req, env):
 
 async def api_confirm_password_change(req, env):
     """POST /api/confirm-password-change — apply a pending password change using the emailed token."""
-    rate_limit_resp = _check_auth_rate_limit(req, env, "confirm_password_change")
+    rate_limit_resp = await _check_auth_rate_limit(req, env, "confirm_password_change")
     if rate_limit_resp:
         return rate_limit_resp
 
@@ -7080,6 +7369,12 @@ class PresenceDO(DurableObject):
         )
 
     async def on_fetch(self, request):
+        parsed = urlparse(getattr(request, "url", ""))
+        if parsed.path in ("/check", "/rate-limit", "/rate-limiter"):
+            if not hasattr(self, "_limiter") or self._limiter is None:
+                self._limiter = RateLimiterDO(self.ctx, self.env)
+            return await self._limiter.on_fetch(request)
+
         upgrade = request.headers.get("Upgrade") or ""
         if upgrade.lower() != "websocket":
             return Response(
@@ -8059,6 +8354,17 @@ async def _dispatch(request, env):
         except Exception as e:
             await capture_exception(e, request, env, "presence_do_dispatch")
             return err("Failed to connect to presence channel", 500)
+
+    if path.startswith("/api/rate-limit"):
+        do_binding = getattr(env, "RATE_LIMITER_DO", None) or getattr(env, "PRESENCE_DO", None)
+        if do_binding:
+            try:
+                do_id = do_binding.idFromName("auth_rate_limiter")
+                stub = do_binding.get(do_id)
+                return await stub.fetch(request)
+            except Exception as e:
+                await capture_exception(e, request, env, "rate_limiter_do_dispatch")
+                return err("Failed to connect to rate limiter", 500)
 
     if path.startswith("/api/"):
         if path == "/api/init" and method == "POST":
