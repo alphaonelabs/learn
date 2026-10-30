@@ -52,6 +52,10 @@ binding = "MY_BUCKET"
 bucket_name = "alphaonelabs-production"
 
 
+[vars]
+ALLOW_ANON_PRESENCE = "true"
+ALLOW_ANON_CLASSROOM_POC = "true"
+
 [observability]
 enabled = false
 head_sampling_rate = 1

@@ -330,7 +330,7 @@
     }
 
     const classroomLink = document.getElementById('act-classroom-link');
-    if (classroomLink) classroomLink.href = '/classroom_poc?autojoin=1&room=' + encodeURIComponent(a.slug || a.id || 'lobby');
+    if (classroomLink) classroomLink.href = '/classroom_poc?autojoin=1&room=' + encodeURIComponent(a.slug || a.id || 'lobby') + (data.is_host ? '&role=instructor' : '');
 
     document.getElementById('act-badges').innerHTML =
       '<span class="badge bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">' + (typeIcon[a.type] || '✨') + ' ' + esc(typeLabel[a.type] || a.type || 'Activity') + '</span>' +
